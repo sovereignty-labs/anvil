@@ -14,28 +14,21 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - name: Install tools
-        run: apk add --no-cache docker-cli git curl
+      - name: Setup
+        run: apk add --no-cache docker-cli
 
-      - name: Registry login
+      - name: Login
         run: echo $REGISTRY_PASSWORD | docker login gitea-http.gitea.svc.cluster.local:3000 -u $REGISTRY_USER --password-stdin
 
-      - name: Clone
+      - name: Fetch source
         run: |
-          rm -rf /src
-          git clone http://gitea-http.gitea.svc.cluster.local:3000/kit/nollama.git /src
-
-      - name: Test
-        run: |
-          curl -sL https://go.dev/dl/go1.22.12.linux-amd64.tar.gz | tar -C /usr/local -xzf -
-          export PATH="/usr/local/go/bin:$PATH"
-          cd /src
-          go test ./...
+          rm -rf /src && mkdir -p /src
+          wget -qO- http://gitea-http.gitea.svc.cluster.local:3000/kit/nollama/archive/main.tar.gz | tar xz -C /src --strip-components=1
 
       - name: Build and push
         run: |
           cd /src
-          SHA_SHORT=$(git rev-parse --short HEAD)
+          SHA_SHORT=$(echo ${GITHUB_SHA} | cut -c1-7)
           docker build \
             --build-arg VERSION=${SHA_SHORT} \
             --build-arg COMMIT=${SHA_SHORT} \
