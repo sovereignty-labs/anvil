@@ -1,9 +1,9 @@
 name: CI
 
 on:
-  push:
-    branches: ["**"]
   pull_request:
+    branches: [main]
+  push:
     branches: [main]
 
 jobs:
@@ -12,15 +12,17 @@ jobs:
     steps:
       - name: Clone
         run: |
-          rm -rf /src
-          git clone --depth 1 --branch ${GITHUB_REF_NAME} http://gitea-http.gitea.svc.cluster.local:3000/${GITHUB_REPOSITORY}.git /src
+          git clone --depth 1 http://gitea-http.gitea.svc.cluster.local:3000/${GITHUB_REPOSITORY}.git /src
+          cd /src
+          if [ "${GITHUB_EVENT_NAME}" = "pull_request" ]; then
+            git fetch --depth 1 origin ${GITHUB_HEAD_REF}
+            git checkout FETCH_HEAD
+          fi
 
       - name: Install Go
         run: |
           curl -sL https://go.dev/dl/go1.22.12.linux-amd64.tar.gz -o /tmp/go.tar.gz
           tar -C /usr/local -xzf /tmp/go.tar.gz
-          export PATH="/usr/local/go/bin:$PATH"
-          go version
 
       - name: Build
         run: |
@@ -41,4 +43,4 @@ jobs:
         run: |
           cd /src
           export PATH="/usr/local/go/bin:$PATH"
-          go test ./...
+          go test -v ./...
