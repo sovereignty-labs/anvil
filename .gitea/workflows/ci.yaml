@@ -13,9 +13,7 @@ jobs:
       - name: Clone
         run: |
           rm -rf /src
-          git clone http://gitea-http.gitea.svc.cluster.local:3000/$GITHUB_REPOSITORY.git /src
-          cd /src
-          git checkout $GITHUB_SHA
+          git clone --depth 1 --branch ${GITHUB_REF_NAME} http://gitea-http.gitea.svc.cluster.local:3000/${GITHUB_REPOSITORY}.git /src
 
       - name: Install Go
         run: |
