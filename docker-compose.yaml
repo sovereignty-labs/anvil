@@ -7,7 +7,7 @@ services:
         VERSION: dev
         COMMIT: none
         DATE: unknown
-    image: nollama:dev
+    image: git.hirdforge.com/kit/nollama/nollama:latest
     container_name: nollama
     restart: unless-stopped
     ports:
