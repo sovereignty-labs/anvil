@@ -12,12 +12,8 @@ jobs:
     steps:
       - name: Clone
         run: |
-          git clone --depth 1 http://gitea-http.gitea.svc.cluster.local:3000/${GITHUB_REPOSITORY}.git /src
-          cd /src
-          if [ "${GITHUB_EVENT_NAME}" = "pull_request" ]; then
-            git fetch --depth 1 origin ${GITHUB_HEAD_REF}
-            git checkout FETCH_HEAD
-          fi
+          mkdir -p /src
+          curl -sL http://gitea-http.gitea.svc.cluster.local:3000/${GITHUB_REPOSITORY}/archive/${GITHUB_HEAD_REF:-${GITHUB_REF_NAME:-main}}.tar.gz | tar xz -C /src --strip-components=1
 
       - name: Install Go
         run: |
