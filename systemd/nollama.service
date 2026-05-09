@@ -1,0 +1,27 @@
+[Unit]
+Description=nollama — llama-server process manager
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/nollama serve --config /etc/nollama/config.yaml
+Restart=on-failure
+RestartSec=5
+User=nollama
+Group=nollama
+
+# Allow GPU access
+SupplementaryGroups=video render
+
+# Resource limits
+LimitNOFILE=65536
+LimitMEMLOCK=infinity
+
+# Security hardening
+ProtectSystem=strict
+ReadWritePaths=/mnt/models
+PrivateTmp=true
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target
