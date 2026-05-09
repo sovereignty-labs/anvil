@@ -1,0 +1,53 @@
+services:
+  nollama:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        VERSION: dev
+        COMMIT: none
+        DATE: unknown
+    image: nollama:dev
+    container_name: nollama
+    restart: unless-stopped
+    ports:
+      - "11434:11434"
+    volumes:
+      - /mnt/models/gguf:/mnt/models/gguf:ro
+    # Uncomment when llama-server runs inside this compose stack and you want
+    # nollama (or a sibling llama-server service) to use the host GPU(s).
+    #
+    # runtime: nvidia
+    # environment:
+    #   NVIDIA_VISIBLE_DEVICES: all
+    #   NVIDIA_DRIVER_CAPABILITIES: compute,utility
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: all
+    #           capabilities: [gpu]
+
+  # Example sibling llama-server service. Uncomment and adjust as needed.
+  #
+  # llama-server:
+  #   image: ghcr.io/ggerganov/llama.cpp:server-cuda
+  #   container_name: llama-server
+  #   restart: unless-stopped
+  #   ports:
+  #     - "8080:8080"
+  #   volumes:
+  #     - /mnt/models/gguf:/models:ro
+  #   command: ["-m", "/models/your-model.gguf", "--host", "0.0.0.0", "--port", "8080"]
+  #   runtime: nvidia
+  #   environment:
+  #     NVIDIA_VISIBLE_DEVICES: all
+  #     NVIDIA_DRIVER_CAPABILITIES: compute,utility
+  #   deploy:
+  #     resources:
+  #       reservations:
+  #         devices:
+  #           - driver: nvidia
+  #             count: all
+  #             capabilities: [gpu]

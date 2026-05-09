@@ -1,0 +1,53 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - "**"
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  build-test:
+    runs-on: ubuntu-latest
+    container:
+      image: golang:1.22
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Cache Go modules
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/go/pkg/mod
+          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum', '**/go.mod') }}
+          restore-keys: |
+            ${{ runner.os }}-go-
+
+      - name: go mod tidy
+        run: go mod tidy
+
+      - name: Build
+        run: |
+          VERSION="${GITHUB_REF_NAME:-dev}"
+          COMMIT="$(git rev-parse --short HEAD || echo none)"
+          DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          go build \
+            -ldflags "-X github.com/hirdforge/nollama/internal/version.Version=${VERSION} \
+                      -X github.com/hirdforge/nollama/internal/version.Commit=${COMMIT} \
+                      -X github.com/hirdforge/nollama/internal/version.Date=${DATE}" \
+            -o nollama ./cmd/nollama
+
+      - name: Test
+        run: go test ./...
+
+      - name: Upload binary artifact
+        if: success() && github.ref == 'refs/heads/main'
+        uses: actions/upload-artifact@v4
+        with:
+          name: nollama
+          path: nollama
+          if-no-files-found: error
