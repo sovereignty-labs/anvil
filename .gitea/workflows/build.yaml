@@ -8,44 +8,40 @@ env:
   REGISTRY: gitea-http.gitea.svc.cluster.local:3000/kit/nollama
   REGISTRY_USER: ${{ secrets.REGISTRY_USER }}
   REGISTRY_PASSWORD: ${{ secrets.REGISTRY_PASSWORD }}
+  DOCKER_HOST: tcp://localhost:2375
 
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
       - name: Install tools
-        run: apk add --no-cache curl git
+        run: apk add --no-cache docker-cli git curl
 
       - name: Registry login
-        run: echo $REGISTRY_PASSWORD | crane auth login gitea-http.gitea.svc.cluster.local:3000 -u $REGISTRY_USER --password-stdin
+        run: echo $REGISTRY_PASSWORD | docker login gitea-http.gitea.svc.cluster.local:3000 -u $REGISTRY_USER --password-stdin
 
       - name: Clone
         run: |
           rm -rf /src
           git clone http://gitea-http.gitea.svc.cluster.local:3000/kit/nollama.git /src
 
-      - name: Build binary
+      - name: Test
         run: |
           curl -sL https://go.dev/dl/go1.22.12.linux-amd64.tar.gz | tar -C /usr/local -xzf -
           export PATH="/usr/local/go/bin:$PATH"
           cd /src
           go test ./...
-          SHA_SHORT=$(git rev-parse --short HEAD)
-          CGO_ENABLED=0 GOOS=linux go build \
-            -trimpath \
-            -ldflags "-s -w \
-              -X github.com/hirdforge/nollama/internal/version.Version=${SHA_SHORT} \
-              -X github.com/hirdforge/nollama/internal/version.Commit=${SHA_SHORT} \
-              -X github.com/hirdforge/nollama/internal/version.Date=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-            -o /out/nollama ./cmd/nollama
-          /out/nollama --version
 
-      - name: Push image
+      - name: Build and push
         run: |
           cd /src
           SHA_SHORT=$(git rev-parse --short HEAD)
-          crane append \
-            -b gcr.io/distroless/static-debian12 \
+          docker build \
+            --build-arg VERSION=${SHA_SHORT} \
+            --build-arg COMMIT=${SHA_SHORT} \
+            --build-arg DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ) \
             -t ${REGISTRY}/nollama:sha-${SHA_SHORT} \
             -t ${REGISTRY}/nollama:latest \
-            -f <(tar -cf - -C /out nollama)
+            .
+          docker push ${REGISTRY}/nollama:sha-${SHA_SHORT}
+          docker push ${REGISTRY}/nollama:latest
