@@ -23,7 +23,7 @@ jobs:
       - name: Fetch source
         run: |
           rm -rf /src && mkdir -p /src
-          wget -qO- http://gitea-http.gitea.svc.cluster.local:3000/kit/nollama/archive/main.tar.gz | tar xz -C /src --strip-components=1
+          wget -qO- --header="Authorization: token ${REGISTRY_PASSWORD}" http://gitea-http.gitea.svc.cluster.local:3000/api/v1/repos/kit/nollama/archive/main.tar.gz | tar xz -C /src --strip-components=1
 
       - name: Build and push
         run: |
