@@ -1,0 +1,19 @@
+# nollama.yaml — Example configuration
+#
+# Config is optional. nollama works with zero config — just `nollama serve`
+# and then `nollama load model.gguf`. This file pre-defines what to load on
+# startup and sets fleet-level defaults.
+#
+# Default locations: ~/.config/nollama/config.yaml or /etc/nollama/config.yaml
+
+# Where GGUFs live on this machine
+model_dir: /mnt/models/gguf
+
+# Listen address
+bind: 0.0.0.0:11434
+
+# Global defaults applied to all loads (overridable per-model)
+defaults:
+  flash-attn: "on"
+  no-warmup: true
+  jinja: true

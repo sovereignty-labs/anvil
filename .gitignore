@@ -1,0 +1,17 @@
+# Binary
+nollama
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Test
+coverage.out
+*.test
