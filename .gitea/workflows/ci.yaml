@@ -10,6 +10,13 @@ jobs:
   build-test:
     runs-on: ubuntu-latest
     steps:
+      - name: Clone
+        run: |
+          rm -rf /src
+          git clone http://gitea-http.gitea.svc.cluster.local:3000/$GITHUB_REPOSITORY.git /src
+          cd /src
+          git checkout $GITHUB_SHA
+
       - name: Install Go
         run: |
           curl -sL https://go.dev/dl/go1.22.12.linux-amd64.tar.gz -o /tmp/go.tar.gz
@@ -19,6 +26,7 @@ jobs:
 
       - name: Build
         run: |
+          cd /src
           export PATH="/usr/local/go/bin:$PATH"
           go mod tidy
           VERSION="${GITHUB_REF_NAME:-dev}"
@@ -33,5 +41,6 @@ jobs:
 
       - name: Test
         run: |
+          cd /src
           export PATH="/usr/local/go/bin:$PATH"
           go test ./...
