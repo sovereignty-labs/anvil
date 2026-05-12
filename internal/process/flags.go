@@ -18,6 +18,8 @@ type Result struct {
 	VRAMTotalMB    uint64   // available VRAM on selected device in MiB
 	CPUFallback    bool     // whether CPU fallback was used
 	CPUThreads     int      // number of CPU threads (non-zero only when CPU fallback)
+	GPUIndex       int      // GPU index used (-1 for CPU fallback)
+	Port           int      // llama-server HTTP port (11434 + modelIndex)
 }
 
 // ComputeFlags takes a GGUF model (with its path), hardware inventory and returns the
@@ -38,6 +40,7 @@ func ComputeFlags(meta *model.GGUFMetadata, modelPath string, inv *hardware.Inve
 			"--host", "0.0.0.0",
 			"--port", fmt.Sprintf("%d", port),
 		},
+		Port: port,
 	}
 
 	// Estimate required VRAM: file size + 20% overhead for KV cache
@@ -50,6 +53,7 @@ func ComputeFlags(meta *model.GGUFMetadata, modelPath string, inv *hardware.Inve
 
 	if bestGPU != nil {
 		result.SelectedDevice = fmt.Sprintf("cuda:%d", bestGPU.Index)
+		result.GPUIndex = bestGPU.Index
 		result.Flags = append(result.Flags,
 			"--n-gpu-layers", "99",
 			"--flash-attn",
