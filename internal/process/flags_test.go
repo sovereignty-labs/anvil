@@ -222,11 +222,8 @@ func TestComputeFlags_CPU_Fallback(t *testing.T) {
 		flagMap[f] = true
 	}
 
-	if flagMap["--n-gpu-layers"] {
-		t.Error("did not expect --n-gpu-layers in CPU fallback mode")
-	}
-	if !flagMap["--flash-attn"] {
-		t.Error("expected --flash-attn flag")
+	if !flagMap["--n-gpu-layers"] {
+		t.Error("expected --n-gpu-layers in CPU fallback mode to force CPU-only")
 	}
 	if !flagMap["--threads"] {
 		t.Error("expected --threads flag in CPU mode")

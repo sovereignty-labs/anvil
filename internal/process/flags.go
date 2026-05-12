@@ -81,7 +81,7 @@ func ComputeFlags(meta *model.GGUFMetadata, modelPath string, inv *hardware.Inve
 		result.CPUFallback = true
 		result.SelectedDevice = "cpu"
 		result.Flags = append(result.Flags,
-			"--flash-attn", "on",
+			"--n-gpu-layers", "0",
 			"--no-warmup",
 		)
 		result.VRAMTotalMB = 0
