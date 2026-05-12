@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/hirdforge/nollama/internal/hardware"
 	"github.com/hirdforge/nollama/internal/model"
@@ -226,8 +227,11 @@ var cpCmd = &cobra.Command{
 func runLoad(cmd *cobra.Command, args []string) error {
 	modelPath := args[0]
 
-	// Resolve llama-server path: flag takes priority, then env var
+	// Resolve llama-server path: try local flag, then persistent flag, then env var
 	llamaServerFlag, _ := cmd.Flags().GetString("llama-server")
+	if llamaServerFlag == "" {
+		llamaServerFlag, _ = cmd.Parent().PersistentFlags().GetString("llama-server")
+	}
 	if llamaServerFlag == "" {
 		llamaServerFlag = os.Getenv("NOLLAMA_LLAMA_SERVER")
 	}
@@ -309,11 +313,13 @@ func runLoad(cmd *cobra.Command, args []string) error {
 		// Flags table
 		fmt.Println()
 		fmt.Println("Flags:")
-		for i := 0; i < len(result.Flags); i += 2 {
-			if i+1 < len(result.Flags) {
-				fmt.Printf("  %-20s %s\n", result.Flags[i]+":", result.Flags[i+1])
+		for i := 0; i < len(result.Flags); i++ {
+			flag := result.Flags[i]
+			if i+1 < len(result.Flags) && !strings.HasPrefix(result.Flags[i+1], "--") {
+				fmt.Printf("  %-20s %s\n", flag+":", result.Flags[i+1])
+				i++
 			} else {
-				fmt.Printf("  %-20s (no value)\n", result.Flags[i])
+				fmt.Printf("  %-20s (true)\n", flag+":")
 			}
 		}
 
