@@ -1,40 +1,51 @@
-name: Build and Push
+name: Build and Test
 
 on:
   push:
     branches: [main]
+  pull_request:
+    branches: [main]
 
 env:
-  REGISTRY: gitea-http.gitea.svc.cluster.local:3000/kit/nollama
-  REGISTRY_USER: ${{ secrets.REGISTRY_USER }}
   REGISTRY_PASSWORD: ${{ secrets.REGISTRY_PASSWORD }}
-  DOCKER_HOST: tcp://localhost:2375
 
 jobs:
   build:
     runs-on: ubuntu-latest
+
     steps:
-      - name: Setup
-        run: apk add --no-cache docker-cli
-
-      - name: Login
-        run: echo $REGISTRY_PASSWORD | docker login gitea-http.gitea.svc.cluster.local:3000 -u $REGISTRY_USER --password-stdin
-
-      - name: Fetch source
+      - name: Install Go
         run: |
-          rm -rf /src && mkdir -p /src
-          wget -qO- --header="Authorization: token ${REGISTRY_PASSWORD}" http://gitea-http.gitea.svc.cluster.local:3000/api/v1/repos/kit/nollama/archive/main.tar.gz | tar xz -C /src --strip-components=1
+          apk add --no-cache go git
+          go version
 
-      - name: Build and push
+      - name: Clone repository
+        run: |
+          rm -rf /src && git clone http://kit:${REGISTRY_PASSWORD}@gitea-http.gitea.svc.cluster.local:3000/kit/nollama.git /src
+
+      - name: Download dependencies
         run: |
           cd /src
-          SHA_SHORT=$(echo ${GITHUB_SHA} | cut -c1-7)
-          docker build \
-            --build-arg VERSION=${SHA_SHORT} \
-            --build-arg COMMIT=${SHA_SHORT} \
-            --build-arg DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ) \
-            -t ${REGISTRY}/nollama:sha-${SHA_SHORT} \
-            -t ${REGISTRY}/nollama:latest \
-            .
-          docker push ${REGISTRY}/nollama:sha-${SHA_SHORT}
-          docker push ${REGISTRY}/nollama:latest
+          go mod download
+
+      - name: Run tests
+        run: |
+          cd /src
+          go test ./...
+
+      - name: Build binary
+        run: |
+          cd /src
+          SHA_SHORT=$(git rev-parse --short HEAD)
+          CGO_ENABLED=0 GOOS=linux go build \
+            -trimpath \
+            -ldflags "-s -w \
+              -X github.com/hirdforge/nollama/internal/version.Version=dev \
+              -X github.com/hirdforge/nollama/internal/version.Commit=${SHA_SHORT} \
+              -X github.com/hirdforge/nollama/internal/version.Date=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            -o /src/nollama ./cmd/nollama
+
+      - name: Verify binary
+        run: |
+          /src/nollama --version
+          /src/nollama --help
