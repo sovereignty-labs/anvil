@@ -182,11 +182,11 @@ func ParseGGUF(path string) (*GGUFMetadata, error) {
 		m.KV[key] = val
 	}
 
-	m.extractFields()
+	m.ExtractFields()
 	return m, nil
 }
 
-func (m *GGUFMetadata) extractFields() {
+func (m *GGUFMetadata) ExtractFields() {
 	m.Architecture = m.getString("general.architecture")
 	m.Name = m.getString("general.name")
 
