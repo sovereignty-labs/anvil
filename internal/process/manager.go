@@ -204,6 +204,11 @@ func (m *Manager) Start(result *Result, modelName string, passthrough []string) 
 		logFile:   logFile,
 	}
 
+	// Hide GPUs from llama-server in CPU fallback mode to prevent hanging on GPU auto-fit
+	if result.CPUFallback {
+		cmd.Env = append(os.Environ(), "CUDA_VISIBLE_DEVICES=")
+	}
+
 	// Start the process
 	if err := cmd.Start(); err != nil {
 		logFile.Close()
