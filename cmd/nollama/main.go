@@ -38,17 +38,6 @@ Powered by llama.cpp (Georgi Gerganov). MIT licensed.`,
 	Version:       version.Version,
 }
 
-// --- serve ---
-
-var serveCmd = &cobra.Command{
-	Use:   "serve",
-	Short: "Start the nollama daemon",
-	Long:  "Run nollama as a daemon, managing llama-server processes and serving the unified API.",
-	RunE: func(cmd *cobra.Command, args []string) error {
-		return fmt.Errorf("not implemented yet — coming in S2")
-	},
-}
-
 // --- load ---
 
 var loadCmd = &cobra.Command{
@@ -170,16 +159,6 @@ func runStatus(cmd *cobra.Command, args []string) error {
 	}
 
 	return nil
-}
-
-// --- models ---
-
-var modelsCmd = &cobra.Command{
-	Use:   "models",
-	Short: "List local GGUF models",
-	RunE: func(cmd *cobra.Command, args []string) error {
-		return fmt.Errorf("not implemented yet — coming in S2")
-	},
 }
 
 // --- inspect ---
@@ -545,8 +524,6 @@ func init() {
 	unloadCmd.Flags().IntVar(&unloadPort, "port", 0, "Stop process by port number instead of model name")
 
 	// serve flags
-	serveCmd.Flags().String("bind", "0.0.0.0:11434", "Listen address")
-	serveCmd.Flags().String("config", "", "Config file path")
 	serveCmd.Flags().Bool("mcp", false, "Enable MCP server")
 
 	// cp flags

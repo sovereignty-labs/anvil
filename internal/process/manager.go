@@ -3,6 +3,7 @@ package process
 
 import (
 	"fmt"
+	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -11,7 +12,19 @@ import (
 	"sync"
 	"syscall"
 	"time"
+
+	"github.com/hirdforge/nollama/internal/hardware"
 )
+
+// StartOpts holds the configuration for starting a new llama-server process.
+type StartOpts struct {
+	ModelPath   string            // absolute path to the GGUF model
+	LlamaServer string            // path to llama-server binary
+	GPU         int               // GPU index (-1 for CPU)
+	ForceCPU    bool              // force CPU inference
+	ExtraFlags  []string          // additional llama-server flags
+	Hardware    *hardware.Inventory
+}
 
 // ProcessInfo holds metadata for a tracked llama-server process.
 type ProcessInfo struct {
@@ -57,6 +70,7 @@ type Manager struct {
 	procs    map[int]*ProcessInfo // keyed by PID
 	portMap  map[int]*ProcessInfo // keyed by port
 	logDir   string
+	logger   *slog.Logger
 }
 
 var defaultManager *Manager
@@ -66,6 +80,7 @@ func init() {
 		procs:   make(map[int]*ProcessInfo),
 		portMap: make(map[int]*ProcessInfo),
 		logDir:  "/tmp/nollama",
+		logger:  slog.Default(),
 	}
 }
 
@@ -75,11 +90,15 @@ func GetManager() *Manager {
 }
 
 // NewManager creates a fresh Manager (useful for tests).
-func NewManager() *Manager {
+func NewManager(logger *slog.Logger) *Manager {
+	if logger == nil {
+		logger = slog.Default()
+	}
 	return &Manager{
 		procs:   make(map[int]*ProcessInfo),
 		portMap: make(map[int]*ProcessInfo),
 		logDir:  "/tmp/nollama",
+		logger:  logger,
 	}
 }
 
@@ -222,6 +241,94 @@ func (m *Manager) Start(result *Result, modelName string, passthrough []string) 
 	m.portMap[procInfo.Port] = procInfo
 
 	return procInfo, nil
+}
+
+// StartOptsStart starts a llama-server process from StartOpts configuration.
+// Returns the port the server is listening on.
+func (m *Manager) StartOptsStart(opts StartOpts) (int, error) {
+	if opts.LlamaServer == "" {
+		return 0, fmt.Errorf("llama-server path is required")
+	}
+	if opts.ModelPath == "" {
+		return 0, fmt.Errorf("model path is required")
+	}
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if err := m.ensureLogDir(); err != nil {
+		return 0, fmt.Errorf("failed to prepare log directory: %w", err)
+	}
+
+	// Build flags from opts
+	var flags []string
+
+	// GPU/device selection
+	gpuIndex := "cpu"
+	if !opts.ForceCPU && opts.GPU >= 0 {
+		gpuIndex = fmt.Sprintf("cuda:%d", opts.GPU)
+		flags = append(flags, "--gpu-layers", "99")
+	} else {
+		opts.ForceCPU = true
+	}
+
+	// Model path
+	flags = append(flags, "-m", opts.ModelPath)
+
+	// Extra flags
+	flags = append(flags, opts.ExtraFlags...)
+
+	// Port selection - find next available port
+	port := 11434
+	for m.portMap[port] != nil {
+		port++
+	}
+	flags = append(flags, "--port", fmt.Sprintf("%d", port))
+
+	// Open log file
+	logFile, err := m.openLogFile(port)
+	if err != nil {
+		return 0, fmt.Errorf("failed to open log file: %w", err)
+	}
+
+	// Build the command
+	cmd := exec.Command(opts.LlamaServer, flags...)
+
+	cmd.Stdout = logFile
+	cmd.Stderr = logFile
+
+	// Hide GPUs in CPU mode
+	if opts.ForceCPU {
+		cmd.Env = append(os.Environ(), "CUDA_VISIBLE_DEVICES=")
+	}
+
+	modelName := filepath.Base(opts.ModelPath)
+
+	procInfo := &ProcessInfo{
+		PID:       -1,
+		ModelPath: opts.ModelPath,
+		ModelName: modelName,
+		Port:      port,
+		GPUIndex:  gpuIndex,
+		StartTime: time.Now(),
+		Flags:     flags,
+		cmd:       cmd,
+		logFile:   logFile,
+	}
+
+	// Start the process
+	if err := cmd.Start(); err != nil {
+		logFile.Close()
+		return 0, fmt.Errorf("failed to start llama-server: %w", err)
+	}
+
+	procInfo.PID = cmd.Process.Pid
+
+	// Track the process
+	m.procs[procInfo.PID] = procInfo
+	m.portMap[procInfo.Port] = procInfo
+
+	return port, nil
 }
 
 // StopByPort stops a process by its port number.

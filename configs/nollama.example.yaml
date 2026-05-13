@@ -1,19 +1,92 @@
 # nollama.yaml — Example configuration
 #
-# Config is optional. nollama works with zero config — just `nollama serve`
-# and then `nollama load model.gguf`. This file pre-defines what to load on
-# startup and sets fleet-level defaults.
+# Config is optional. nollama works with zero config:
+#   nollama serve → nollama load model.gguf
 #
-# Default locations: ~/.config/nollama/config.yaml or /etc/nollama/config.yaml
+# This file pre-defines what to load on startup and sets fleet-level defaults.
+#
+# Default locations:
+#   ~/.config/nollama/config.yaml
+#   /etc/nollama/config.yaml
+#
+# Or specify explicitly:
+#   nollama serve --config /path/to/config.yaml
+#
+# Reload without restart: kill -HUP $(pidof nollama)
 
 # Where GGUFs live on this machine
 model_dir: /mnt/models/gguf
 
-# Listen address
+# Where the llama-server binary lives
+# Managed by `nollama runtime` commands. Override to point at a custom binary.
+# llama_server: /opt/llama.cpp/build/bin/llama-server
+
+# Listen address for the unified API endpoint
 bind: 0.0.0.0:11434
+
+# Remotes (federation — Phase 2)
+# remotes:
+#   gpu-host:
+#     url: http://gpu-host.example.internal:11434
+#   inference-host:
+#     url: http://inference-host.example.internal:11434
+
+# Models to auto-load on startup
+autoload:
+  - model: gemma-4-26B-A4B-Q3_K_XL.gguf
+    gpu: 0
+    # runtime: turboquant           # Use TheTom's fork for this model
+    flags:
+      ctx-size: 131072
+      parallel: 8
+      flash-attn: "on"
+      cache-type-k: q8_0
+      # cache-type-v: turbo3        # Requires TurboQuant fork
+
+  - model: gemma-4-26B-A4B-Q5_K_S.gguf
+    gpu: 1
+    flags:
+      ctx-size: 131072
+      parallel: 3
+      flash-attn: "on"
+      cache-type-k: q8_0
+
+  # CPU inference for large-context background work
+  # - model: gemma-4-26B-A4B-BF16.gguf
+  #   device: cpu
+  #   flags:
+  #     ctx-size: 262144
+  #     threads: 12
+  #     parallel: 1
+
+# Model aliases for API routing
+# Requests with "model": "advisor" route to the Qwen model.
+# Swap underlying models without changing client configuration.
+aliases:
+  advisor: Qwen3.6-35B-A3B-Q4_K_S
+  builder: gemma-4-26B-A4B-Q3_K_XL
 
 # Global defaults applied to all loads (overridable per-model)
 defaults:
   flash-attn: "on"
   no-warmup: true
   jinja: true
+
+# Hardware profiles (optional — override auto-detection)
+# Useful when auto-detection gets CUDA device order wrong
+# gpus:
+#   0:
+#     name: "RTX Pro 4000 Blackwell"
+#     vram: 24576  # MiB
+#   1:
+#     name: "RTX 5060 Ti"
+#     vram: 16384
+
+# Management API (Phase 2 — not yet implemented)
+# management:
+#   bind: 127.0.0.1:11435
+
+# MCP server (Phase 2 — not yet implemented)
+# mcp:
+#   enabled: true
+#   transport: stdio

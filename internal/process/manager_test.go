@@ -31,7 +31,7 @@ func makeTestResult(t *testing.T, port int, llamaServerPath string, flags ...str
 
 func TestManager_Start(t *testing.T) {
 	tmpDir := t.TempDir()
-	manager := NewManager()
+	manager := NewManager(nil)
 	manager.SetLogDir(tmpDir)
 
 	// Create a mock script that sleeps
@@ -89,7 +89,7 @@ func TestManager_Start(t *testing.T) {
 
 func TestManager_Start_MissingBinary(t *testing.T) {
 	tmpDir := t.TempDir()
-	manager := NewManager()
+	manager := NewManager(nil)
 	manager.SetLogDir(tmpDir)
 
 	result := makeTestResult(t, 19998, "/nonexistent/path/to/llama-server")
@@ -102,7 +102,7 @@ func TestManager_Start_MissingBinary(t *testing.T) {
 
 func TestManager_Stop(t *testing.T) {
 	tmpDir := t.TempDir()
-	manager := NewManager()
+	manager := NewManager(nil)
 	manager.SetLogDir(tmpDir)
 
 	mockScript := filepath.Join(tmpDir, "mock-llama-server")
@@ -151,7 +151,7 @@ func TestManager_Stop(t *testing.T) {
 
 func TestManager_Stop_ModelName(t *testing.T) {
 	tmpDir := t.TempDir()
-	manager := NewManager()
+	manager := NewManager(nil)
 	manager.SetLogDir(tmpDir)
 
 	mockScript := filepath.Join(tmpDir, "mock-llama-server")
@@ -188,7 +188,7 @@ func TestManager_Stop_ModelName(t *testing.T) {
 }
 
 func TestManager_Stop_ModelNotFound(t *testing.T) {
-	manager := NewManager()
+	manager := NewManager(nil)
 
 	_, err := manager.StopByModelName("nonexistent-model.gguf")
 	if err == nil {
@@ -203,7 +203,7 @@ func TestManager_Stop_ModelNotFound(t *testing.T) {
 
 func TestManager_List(t *testing.T) {
 	tmpDir := t.TempDir()
-	manager := NewManager()
+	manager := NewManager(nil)
 	manager.SetLogDir(tmpDir)
 
 	mockScript := filepath.Join(tmpDir, "mock-llama-server")
@@ -249,7 +249,7 @@ func TestManager_List(t *testing.T) {
 }
 
 func TestManager_List_Empty(t *testing.T) {
-	manager := NewManager()
+	manager := NewManager(nil)
 	procs := manager.List()
 	if len(procs) != 0 {
 		t.Errorf("expected 0 processes, got %d", len(procs))
@@ -258,7 +258,7 @@ func TestManager_List_Empty(t *testing.T) {
 
 func TestManager_LogFile(t *testing.T) {
 	tmpDir := t.TempDir()
-	manager := NewManager()
+	manager := NewManager(nil)
 	manager.SetLogDir(tmpDir)
 
 	mockScript := filepath.Join(tmpDir, "mock-llama-server")
@@ -296,7 +296,7 @@ func TestManager_LogFile(t *testing.T) {
 
 func TestManager_MultipleProcesses(t *testing.T) {
 	tmpDir := t.TempDir()
-	manager := NewManager()
+	manager := NewManager(nil)
 	manager.SetLogDir(tmpDir)
 
 	mockScript := filepath.Join(tmpDir, "mock-llama-server")
@@ -337,7 +337,7 @@ func TestManager_MultipleProcesses(t *testing.T) {
 
 func TestManager_Uptime(t *testing.T) {
 	tmpDir := t.TempDir()
-	manager := NewManager()
+	manager := NewManager(nil)
 	manager.SetLogDir(tmpDir)
 
 	mockScript := filepath.Join(tmpDir, "mock-llama-server")
@@ -392,7 +392,7 @@ func TestFormatDuration(t *testing.T) {
 
 func TestProcessInfo_Status(t *testing.T) {
 	tmpDir := t.TempDir()
-	manager := NewManager()
+	manager := NewManager(nil)
 	manager.SetLogDir(tmpDir)
 
 	mockScript := filepath.Join(tmpDir, "mock-llama-server")
@@ -420,7 +420,7 @@ func TestProcessInfo_Status(t *testing.T) {
 }
 
 func TestNewManager(t *testing.T) {
-	m := NewManager()
+	m := NewManager(nil)
 	if m == nil {
 		t.Fatal("NewManager returned nil")
 	}
@@ -437,7 +437,7 @@ func TestNewManager(t *testing.T) {
 
 func TestManager_GetByPID(t *testing.T) {
 	tmpDir := t.TempDir()
-	manager := NewManager()
+	manager := NewManager(nil)
 	manager.SetLogDir(tmpDir)
 
 	mockScript := filepath.Join(tmpDir, "mock-llama-server")
@@ -470,7 +470,7 @@ func TestManager_GetByPID(t *testing.T) {
 
 func TestManager_GetByPort(t *testing.T) {
 	tmpDir := t.TempDir()
-	manager := NewManager()
+	manager := NewManager(nil)
 	manager.SetLogDir(tmpDir)
 
 	mockScript := filepath.Join(tmpDir, "mock-llama-server")
@@ -682,7 +682,7 @@ func TestEndpointURL(t *testing.T) {
 
 func TestManager_Stop_SignalGraceful(t *testing.T) {
 	tmpDir := t.TempDir()
-	manager := NewManager()
+	manager := NewManager(nil)
 	manager.SetLogDir(tmpDir)
 
 	// Create a mock script that responds to SIGTERM
@@ -714,7 +714,7 @@ func TestManager_Stop_SignalGraceful(t *testing.T) {
 
 func TestManager_Stop_KillAfterTimeout(t *testing.T) {
 	tmpDir := t.TempDir()
-	manager := NewManager()
+	manager := NewManager(nil)
 	manager.SetLogDir(tmpDir)
 
 	// Create a mock script that ignores SIGTERM
@@ -746,7 +746,7 @@ func TestManager_Stop_KillAfterTimeout(t *testing.T) {
 
 func TestManager_ConcurrentStartStop(t *testing.T) {
 	tmpDir := t.TempDir()
-	manager := NewManager()
+	manager := NewManager(nil)
 	manager.SetLogDir(tmpDir)
 
 	mockScript := filepath.Join(tmpDir, "mock-llama-server")
@@ -810,7 +810,7 @@ func TestManager_ConcurrentStartStop(t *testing.T) {
 // Test that the Manager doesn't leak processes on repeated Start/Stop cycles.
 func TestManager_Reuse(t *testing.T) {
 	tmpDir := t.TempDir()
-	manager := NewManager()
+	manager := NewManager(nil)
 	manager.SetLogDir(tmpDir)
 
 	mockScript := filepath.Join(tmpDir, "mock-llama-server")
@@ -846,7 +846,7 @@ func TestManager_Reuse(t *testing.T) {
 
 func TestProcessInfo_Uptime_Increasing(t *testing.T) {
 	tmpDir := t.TempDir()
-	manager := NewManager()
+	manager := NewManager(nil)
 	manager.SetLogDir(tmpDir)
 
 	mockScript := filepath.Join(tmpDir, "mock-llama-server")
@@ -874,7 +874,7 @@ func TestProcessInfo_Uptime_Increasing(t *testing.T) {
 
 // Test that LogDir returns the configured value.
 func TestManager_LogDir(t *testing.T) {
-	manager := NewManager()
+	manager := NewManager(nil)
 	if manager.LogDir() != "/tmp/nollama" {
 		t.Errorf("expected default log dir '/tmp/nollama', got %q", manager.LogDir())
 	}
@@ -887,7 +887,7 @@ func TestManager_LogDir(t *testing.T) {
 
 // Test Stop with a nil process (already stopped).
 func TestManager_Stop_NilProcess(t *testing.T) {
-	manager := NewManager()
+	manager := NewManager(nil)
 
 	// Should not panic
 	_, err := manager.StopByPort(99999)
@@ -944,7 +944,7 @@ func TestMergePassthroughFlags_BooleanFlag(t *testing.T) {
 
 // Test Stop with port=0 and empty model name returns error.
 func TestManager_Stop_NoArgs(t *testing.T) {
-	manager := NewManager()
+	manager := NewManager(nil)
 
 	_, err := manager.Stop(0, "")
 	if err == nil {
@@ -955,7 +955,7 @@ func TestManager_Stop_NoArgs(t *testing.T) {
 // Test that Start with a mock command that outputs to stdout writes to the log file.
 func TestManager_LogOutput(t *testing.T) {
 	tmpDir := t.TempDir()
-	manager := NewManager()
+	manager := NewManager(nil)
 	manager.SetLogDir(tmpDir)
 
 	// Create a mock script that writes to stdout
@@ -1002,7 +1002,7 @@ func TestProcessInfo_StatusNilCmd(t *testing.T) {
 // Test StopByModelName with a partial name match via HasSuffix.
 func TestManager_StopByModelName_PartialMatch(t *testing.T) {
 	tmpDir := t.TempDir()
-	manager := NewManager()
+	manager := NewManager(nil)
 	manager.SetLogDir(tmpDir)
 
 	mockScript := filepath.Join(tmpDir, "mock-llama-server")
@@ -1042,7 +1042,7 @@ func TestManager_StopByModelName_PartialMatch(t *testing.T) {
 // Test that List returns processes sorted by start time.
 func TestManager_List_SortedByStartTime(t *testing.T) {
 	tmpDir := t.TempDir()
-	manager := NewManager()
+	manager := NewManager(nil)
 	manager.SetLogDir(tmpDir)
 
 	mockScript := filepath.Join(tmpDir, "mock-llama-server")
@@ -1082,7 +1082,7 @@ func TestManager_List_SortedByStartTime(t *testing.T) {
 // Test that the Manager tracks processes in both procs and portMap maps.
 func TestManager_TracksInBothMaps(t *testing.T) {
 	tmpDir := t.TempDir()
-	manager := NewManager()
+	manager := NewManager(nil)
 	manager.SetLogDir(tmpDir)
 
 	mockScript := filepath.Join(tmpDir, "mock-llama-server")

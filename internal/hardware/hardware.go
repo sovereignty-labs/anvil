@@ -41,6 +41,8 @@ type Inventory struct {
 	CPU  CPU
 }
 
+func (i *Inventory) TotalRAMGB() float64 { return i.CPU.RAMTotalGB() }
+
 // DetectGPUs enumerates NVIDIA GPUs via nvidia-smi.
 // Returns nil (not error) if nvidia-smi is not found.
 func DetectGPUs() ([]GPU, error) {

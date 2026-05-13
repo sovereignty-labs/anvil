@@ -1,27 +1,35 @@
 [Unit]
-Description=nollama — llama-server process manager
+Description=nollama — transparent llama-server manager
+Documentation=https://git.hirdforge.com/kit/nollama
 After=network.target
 
 [Service]
 Type=simple
-ExecStart=/usr/local/bin/nollama serve --config /etc/nollama/config.yaml
-Restart=on-failure
-RestartSec=5
 User=nollama
 Group=nollama
+ExecStart=/usr/local/bin/nollama serve --config /etc/nollama/config.yaml
+ExecReload=/bin/kill -HUP $MAINPID
+Restart=on-failure
+RestartSec=5
 
-# Allow GPU access
-SupplementaryGroups=video render
+# Process management
+KillMode=mixed
+KillSignal=SIGTERM
+TimeoutStopSec=30
 
-# Resource limits
-LimitNOFILE=65536
-LimitMEMLOCK=infinity
+# Environment
+Environment=NOLLAMA_LLAMA_SERVER=/usr/local/bin/llama-server
 
-# Security hardening
-ProtectSystem=strict
-ReadWritePaths=/mnt/models
-PrivateTmp=true
-NoNewPrivileges=true
+# Security hardening (optional — comment out if causing issues)
+# ProtectSystem=strict
+# ProtectHome=true
+# ReadWritePaths=/mnt/models /var/log/nollama
+# NoNewPrivileges=true
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=nollama
 
 [Install]
 WantedBy=multi-user.target
