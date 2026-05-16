@@ -65,8 +65,8 @@ var unloadCmd = &cobra.Command{
 
 Find the process by model name (basename of the GGUF file) or by
 specifying a port with --port.`,
-	Args:  cobra.ExactArgs(1),
-	RunE:  runUnload,
+	Args: cobra.ExactArgs(1),
+	RunE: runUnload,
 }
 
 // portFlag is used to find a process by port during unload
@@ -191,9 +191,7 @@ var runtimeCmd = &cobra.Command{
 var runtimeInstallCmd = &cobra.Command{
 	Use:   "install",
 	Short: "Download pre-built llama-server from GitHub Releases",
-	RunE: func(cmd *cobra.Command, args []string) error {
-		return fmt.Errorf("not implemented yet — coming in S2+")
-	},
+	RunE:  runRuntimeInstall,
 }
 
 var runtimeBuildCmd = &cobra.Command{
@@ -207,27 +205,21 @@ var runtimeBuildCmd = &cobra.Command{
 var runtimeListCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List installed llama-server runtimes",
-	RunE: func(cmd *cobra.Command, args []string) error {
-		return fmt.Errorf("not implemented yet — coming in S2+")
-	},
+	RunE:  runRuntimeList,
 }
 
 var runtimeUseCmd = &cobra.Command{
 	Use:   "use <name>",
 	Short: "Set the active llama-server runtime",
 	Args:  cobra.ExactArgs(1),
-	RunE: func(cmd *cobra.Command, args []string) error {
-		return fmt.Errorf("not implemented yet — coming in S2+")
-	},
+	RunE:  runRuntimeUse,
 }
 
 var runtimeAddCmd = &cobra.Command{
 	Use:   "add <name> <path>",
 	Short: "Register an existing llama-server binary",
 	Args:  cobra.ExactArgs(2),
-	RunE: func(cmd *cobra.Command, args []string) error {
-		return fmt.Errorf("not implemented yet — coming in S2+")
-	},
+	RunE:  runRuntimeAdd,
 }
 
 // --- remote ---
@@ -293,27 +285,12 @@ var cpCmd = &cobra.Command{
 	},
 }
 
-// resolveLlamaServerPath resolves the llama-server binary path from flags or env.
-func resolveLlamaServerPath(cmd *cobra.Command) (string, error) {
-	path, _ := cmd.Flags().GetString("llama-server")
-	if path == "" {
-		path, _ = cmd.Parent().PersistentFlags().GetString("llama-server")
-	}
-	if path == "" {
-		path = os.Getenv("NOLLAMA_LLAMA_SERVER")
-	}
-	if path == "" {
-		return "", fmt.Errorf("llama-server path is required: set --llama-server flag or NOLLAMA_LLAMA_SERVER env var")
-	}
-	return path, nil
-}
-
 // runLoad handles the load command — parses GGUF, detects hardware, computes flags.
 func runLoad(cmd *cobra.Command, args []string) error {
 	modelPath := args[0]
 
 	// Resolve llama-server path
-	llamaServerFlag, err := resolveLlamaServerPath(cmd)
+	llamaServerFlag, err := resolveLlamaServerPath(cmd, nil)
 	if err != nil {
 		return err
 	}
@@ -360,7 +337,7 @@ func runLoad(cmd *cobra.Command, args []string) error {
 
 		// Device selection reasoning
 		fileSizeMB := uint64(meta.FileSizeBytes) / 1024 / 1024
-		requiredVRAM := fileSizeMB + (fileSizeMB * 20) / 100
+		requiredVRAM := fileSizeMB + (fileSizeMB*20)/100
 		fmt.Println(GPUReasoning(inv, requiredVRAM))
 		fmt.Println()
 
