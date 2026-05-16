@@ -79,6 +79,17 @@ var unloadPort int
 func runUnload(cmd *cobra.Command, args []string) error {
 	modelName := args[0]
 
+	if client, err := resolveNodeClient(cmd); err != nil {
+		return err
+	} else if client != nil {
+		if err := client.Unload(filepath.Base(modelName)); err != nil {
+			return err
+		}
+		nodeName, _ := cmd.Flags().GetString("node")
+		fmt.Printf("Unloaded model %s on %s\n", filepath.Base(modelName), nodeName)
+		return nil
+	}
+
 	manager := process.GetManager()
 
 	var proc *process.ProcessInfo
@@ -237,6 +248,24 @@ var cpCmd = &cobra.Command{
 // runLoad handles the load command — parses GGUF, detects hardware, computes flags.
 func runLoad(cmd *cobra.Command, args []string) error {
 	modelPath := args[0]
+
+	if client, err := resolveNodeClient(cmd); err != nil {
+		return err
+	} else if client != nil {
+		req, err := buildRemoteLoadRequest(cmd, modelPath)
+		if err != nil {
+			return err
+		}
+		resp, err := client.Load(req)
+		if err != nil {
+			return err
+		}
+
+		nodeName, _ := cmd.Flags().GetString("node")
+		fmt.Printf("Loaded model %s on %s (port %d, PID %d, device %s)\n",
+			resp.Model, nodeName, resp.Port, resp.PID, resp.Device)
+		return nil
+	}
 
 	// Resolve llama-server path
 	llamaServerFlag, err := resolveLlamaServerPath(cmd, nil)
@@ -522,6 +551,51 @@ func sortedRemoteNames(remotes map[string]string) []string {
 	}
 	sort.Strings(names)
 	return names
+}
+
+func buildRemoteLoadRequest(cmd *cobra.Command, modelPath string) (federation.LoadRequest, error) {
+	gpu, err := cmd.Flags().GetInt("gpu")
+	if err != nil {
+		return federation.LoadRequest{}, err
+	}
+	cpu, err := cmd.Flags().GetBool("cpu")
+	if err != nil {
+		return federation.LoadRequest{}, err
+	}
+
+	req := federation.LoadRequest{
+		Model: filepath.Base(modelPath),
+		CPU:   cpu,
+	}
+	if !cpu && gpu >= 0 {
+		req.GPU = &gpu
+	}
+
+	return req, nil
+}
+
+func resolveNodeClient(cmd *cobra.Command) (*federation.Client, error) {
+	node, err := cmd.Flags().GetString("node")
+	if err != nil {
+		return nil, err
+	}
+	node = strings.TrimSpace(node)
+	if node == "" {
+		return nil, nil
+	}
+
+	registry, cfgRemotes, err := loadFederatedRemotes()
+	if err != nil {
+		return nil, err
+	}
+
+	merged := federation.MergeRemotes(registry, cfgRemotes)
+	baseURL, ok := merged[node]
+	if !ok {
+		return nil, fmt.Errorf("remote node %q not found in registry", node)
+	}
+
+	return federation.NewClient(baseURL), nil
 }
 
 func init() {

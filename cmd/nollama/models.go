@@ -7,6 +7,7 @@ import (
 	"text/tabwriter"
 
 	"github.com/hirdforge/nollama/internal/config"
+	"github.com/hirdforge/nollama/internal/federation"
 	"github.com/hirdforge/nollama/internal/model"
 	"github.com/spf13/cobra"
 )
@@ -34,6 +35,22 @@ func init() {
 }
 
 func runModels(cmd *cobra.Command, args []string) error {
+	if client, err := resolveNodeClient(cmd); err != nil {
+		return err
+	} else if client != nil {
+		resp, err := client.Models()
+		if err != nil {
+			return err
+		}
+		if len(resp.Models) == 0 {
+			nodeName, _ := cmd.Flags().GetString("node")
+			fmt.Printf("No GGUF models found on %s\n", nodeName)
+			return nil
+		}
+		renderRemoteModels(resp.Models)
+		return nil
+	}
+
 	// Determine model directory
 	dir := modelsDir
 	if dir == "" {
@@ -69,37 +86,76 @@ func runModels(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	// Print table
-	w := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
-	fmt.Fprintf(w, "MODEL\tSIZE\tARCH\tQUANT\tCONTEXT\n")
-
-	for _, m := range models {
-		arch := "-"
-		quant := "-"
-		ctx := "-"
-
-		if m.Meta != nil {
-			if m.Meta.Architecture != "" {
-				arch = m.Meta.Architecture
-			}
-			if m.Meta.QuantName != "" {
-				quant = m.Meta.QuantName
-			}
-			if m.Meta.ContextLength > 0 {
-				ctx = formatContext(m.Meta.ContextLength)
-			}
-		}
-
-		// Strip .gguf for cleaner display
-		name := strings.TrimSuffix(m.Filename, ".gguf")
-
-		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n", name, m.SizeHuman(), arch, quant, ctx)
-	}
-
-	w.Flush()
+	renderLocalModels(models)
 	fmt.Printf("\n%d models, %s (%s)\n", len(models), totalSize(models), dir)
 
 	return nil
+}
+
+type modelDisplay struct {
+	Name    string
+	Size    string
+	Arch    string
+	Quant   string
+	Context string
+}
+
+func renderLocalModels(models []model.ModelInfo) {
+	rows := make([]modelDisplay, 0, len(models))
+	for _, m := range models {
+		rows = append(rows, modelDisplay{
+			Name:    strings.TrimSuffix(m.Filename, ".gguf"),
+			Size:    m.SizeHuman(),
+			Arch:    "-",
+			Quant:   "-",
+			Context: "-",
+		})
+		if m.Meta != nil {
+			if m.Meta.Architecture != "" {
+				rows[len(rows)-1].Arch = m.Meta.Architecture
+			}
+			if m.Meta.QuantName != "" {
+				rows[len(rows)-1].Quant = m.Meta.QuantName
+			}
+			if m.Meta.ContextLength > 0 {
+				rows[len(rows)-1].Context = formatContext(m.Meta.ContextLength)
+			}
+		}
+	}
+	renderModelTable(rows)
+}
+
+func renderRemoteModels(models []federation.ModelInfo) {
+	rows := make([]modelDisplay, 0, len(models))
+	for _, m := range models {
+		row := modelDisplay{
+			Name:    strings.TrimSuffix(m.Name, ".gguf"),
+			Size:    m.SizeHuman,
+			Arch:    "-",
+			Quant:   "-",
+			Context: "-",
+		}
+		if m.Arch != "" {
+			row.Arch = m.Arch
+		}
+		if m.Quant != "" {
+			row.Quant = m.Quant
+		}
+		if m.ContextLength > 0 {
+			row.Context = formatContext(m.ContextLength)
+		}
+		rows = append(rows, row)
+	}
+	renderModelTable(rows)
+}
+
+func renderModelTable(rows []modelDisplay) {
+	w := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
+	fmt.Fprintln(w, "MODEL\tSIZE\tARCH\tQUANT\tCONTEXT")
+	for _, row := range rows {
+		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n", row.Name, row.Size, row.Arch, row.Quant, row.Context)
+	}
+	_ = w.Flush()
 }
 
 func formatContext(ctx uint64) string {
