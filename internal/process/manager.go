@@ -268,9 +268,10 @@ func (m *Manager) StartOptsStart(opts StartOpts) (int, error) {
 	gpuIndex := "cpu"
 	if !opts.ForceCPU && opts.GPU >= 0 {
 		gpuIndex = fmt.Sprintf("cuda:%d", opts.GPU)
-		flags = append(flags, "--gpu-layers", "99")
+		flags = append(flags, "--n-gpu-layers", "99")
 	} else {
 		opts.ForceCPU = true
+		flags = append(flags, "--n-gpu-layers", "0")
 	}
 
 	// Model path
