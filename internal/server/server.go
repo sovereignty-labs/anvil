@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -243,6 +244,18 @@ func (s *Server) loadModel(entry config.AutoloadEntry, hw *hardware.Inventory) (
 	// Hardware for smart defaults
 	if hw != nil {
 		opts.Hardware = hw
+	}
+
+	// Pass nollama's bind port so the process manager can avoid it
+	_, portStr, err := net.SplitHostPort(s.cfg.Bind)
+	if err == nil {
+		var portNum int
+		if portNum, err = strconv.Atoi(portStr); err == nil {
+			opts.ReservedPort = portNum
+		}
+	}
+	if err != nil {
+		s.logger.Warn("failed to parse bind port from config", "bind", s.cfg.Bind, "error", err)
 	}
 
 	return s.procMgr.StartOptsStart(opts)

@@ -18,12 +18,13 @@ import (
 
 // StartOpts holds the configuration for starting a new llama-server process.
 type StartOpts struct {
-	ModelPath   string            // absolute path to the GGUF model
-	LlamaServer string            // path to llama-server binary
-	GPU         int               // GPU index (-1 for CPU)
-	ForceCPU    bool              // force CPU inference
-	ExtraFlags  []string          // additional llama-server flags
-	Hardware    *hardware.Inventory
+	ModelPath    string            // absolute path to the GGUF model
+	LlamaServer  string            // path to llama-server binary
+	GPU          int               // GPU index (-1 for CPU)
+	ForceCPU     bool              // force CPU inference
+	ExtraFlags   []string          // additional llama-server flags
+	Hardware     *hardware.Inventory
+	ReservedPort int               // port that should be avoided (e.g. nollama proxy port)
 }
 
 // ProcessInfo holds metadata for a tracked llama-server process.
@@ -267,9 +268,10 @@ func (m *Manager) StartOptsStart(opts StartOpts) (int, error) {
 	gpuIndex := "cpu"
 	if !opts.ForceCPU && opts.GPU >= 0 {
 		gpuIndex = fmt.Sprintf("cuda:%d", opts.GPU)
-		flags = append(flags, "--gpu-layers", "99")
+		flags = append(flags, "--n-gpu-layers", "99")
 	} else {
 		opts.ForceCPU = true
+		flags = append(flags, "--n-gpu-layers", "0")
 	}
 
 	// Model path
@@ -279,8 +281,13 @@ func (m *Manager) StartOptsStart(opts StartOpts) (int, error) {
 	flags = append(flags, opts.ExtraFlags...)
 
 	// Port selection - find next available port
-	port := 11434
-	for m.portMap[port] != nil {
+	port := opts.ReservedPort
+	if port == 0 {
+		port = 11434
+	} else {
+		port++
+	}
+	for m.portMap[port] != nil || port == opts.ReservedPort {
 		port++
 	}
 	flags = append(flags, "--port", fmt.Sprintf("%d", port))
@@ -323,6 +330,15 @@ func (m *Manager) StartOptsStart(opts StartOpts) (int, error) {
 	}
 
 	procInfo.PID = cmd.Process.Pid
+
+	// Verify the child process is alive immediately after spawning
+	time.Sleep(500 * time.Millisecond)
+	err = cmd.Process.Signal(syscall.Signal(0))
+	if err != nil {
+		m.cleanupProcess(procInfo)
+		logFile.Close()
+		return 0, fmt.Errorf("llama-server process %d exited immediately (zombie/defunct): %w", procInfo.PID, err)
+	}
 
 	// Track the process
 	m.procs[procInfo.PID] = procInfo
