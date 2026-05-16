@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -1117,4 +1118,64 @@ func TestManager_TracksInBothMaps(t *testing.T) {
 	if manager.GetByPort(port) != nil {
 		t.Error("process still in portMap after stop")
 	}
+}
+
+func TestStartOptsStart_CPU_Device_Flags(t *testing.T) {
+	tmpDir := t.TempDir()
+	manager := NewManager(nil)
+	manager.SetLogDir(tmpDir)
+
+	mockScript := filepath.Join(tmpDir, "mock-llama-server")
+	err := os.WriteFile(mockScript, []byte("#!/bin/sh\nwhile true; do sleep 1; done\n"), 0o755)
+	if err != nil {
+		t.Fatalf("failed to create mock script: %v", err)
+	}
+
+	port, err := manager.StartOptsStart(StartOpts{
+		ModelPath:   "/tmp/test-model.gguf",
+		LlamaServer: mockScript,
+		ForceCPU:    true,
+	})
+	if err != nil {
+		t.Fatalf("StartOptsStart() error: %v", err)
+	}
+	if port <= 0 {
+		t.Fatalf("expected positive port, got %d", port)
+	}
+
+	proc := manager.GetByPort(port)
+	if proc == nil {
+		t.Fatal("process not found by port")
+	}
+
+	// Verify --n-gpu-layers 0 is in flags
+	hasNPGLayers0 := false
+	for i, f := range proc.Flags {
+		if f == "--n-gpu-layers" && i+1 < len(proc.Flags) && proc.Flags[i+1] == "0" {
+			hasNPGLayers0 = true
+			break
+		}
+	}
+	if !hasNPGLayers0 {
+		t.Errorf("expected --n-gpu-layers 0 in flags, got: %v", proc.Flags)
+	}
+
+	// Verify CUDA_VISIBLE_DEVICES is empty (GPU hidden in CPU mode)
+	var cudaVisibleDevices string
+	for _, env := range proc.cmd.Env {
+		if strings.HasPrefix(env, "CUDA_VISIBLE_DEVICES=") {
+			cudaVisibleDevices = env
+			break
+		}
+	}
+	if cudaVisibleDevices != "CUDA_VISIBLE_DEVICES=" {
+		t.Errorf("expected CUDA_VISIBLE_DEVICES=\"\" in environment, got: %s", cudaVisibleDevices)
+	}
+
+	// Verify GPUIndex is "cpu"
+	if proc.GPUIndex != "cpu" {
+		t.Errorf("expected GPUIndex \"cpu\", got %q", proc.GPUIndex)
+	}
+
+	manager.StopByPort(port)
 }
