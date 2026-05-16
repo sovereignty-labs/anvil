@@ -75,11 +75,11 @@ func runServe(cmd *cobra.Command, args []string) error {
 	}
 
 	// llama-server path from persistent flag or env
-	if llamaServer, _ := cmd.Flags().GetString("llama-server"); llamaServer != "" {
-		cfg.LlamaServer = llamaServer
-	} else if envPath := os.Getenv("NOLLAMA_LLAMA_SERVER"); envPath != "" && cfg.LlamaServer == "" {
-		cfg.LlamaServer = envPath
+	llamaServer, err := resolveLlamaServerPath(cmd, cfg)
+	if err != nil {
+		return err
 	}
+	cfg.LlamaServer = llamaServer
 
 	// Verify model_dir exists
 	if cfg.ModelDir != "" {
