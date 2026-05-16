@@ -82,9 +82,12 @@ func (s *Server) Run(ctx context.Context) error {
 	}
 
 	// Start HTTP server
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/status", s.handleStatus)
+	mux.Handle("/", s.proxy)
 	s.httpServer = &http.Server{
 		Addr:    s.cfg.Bind,
-		Handler: s.proxy,
+		Handler: mux,
 	}
 
 	// Listen first so we can report the actual address

@@ -125,42 +125,6 @@ var statusCmd = &cobra.Command{
 	RunE:  runStatus,
 }
 
-func runStatus(cmd *cobra.Command, args []string) error {
-	manager := process.GetManager()
-	procs := manager.List()
-
-	if len(procs) == 0 {
-		fmt.Println("No loaded models. Run `nollama load <model.gguf>` to start one.")
-		return nil
-	}
-
-	fmt.Printf("Loaded models: %d\n\n", len(procs))
-	fmt.Printf("%-25s %-12s %-8s %-8s %-10s %s\n",
-		"MODEL", "PORT", "GPU", "PID", "STATUS", "UPTIME")
-	fmt.Println(strings.Repeat("-", 75))
-
-	for _, p := range procs {
-		status := p.Status()
-		statusStr := string(status)
-		if status == process.ProcessRunning {
-			statusStr = "running"
-		} else {
-			statusStr = "stopped"
-		}
-
-		fmt.Printf("%-25s %-12d %-8s %-8d %-10s %s\n",
-			p.ModelName,
-			p.Port,
-			p.GPUIndex,
-			p.PID,
-			statusStr,
-			process.FormatDuration(p.Uptime()),
-		)
-	}
-
-	return nil
-}
-
 // --- inspect ---
 
 var inspectCmd = &cobra.Command{
