@@ -18,7 +18,7 @@ import (
 
 func main() {
 	if err := rootCmd.Execute(); err != nil {
-		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
 }
@@ -65,8 +65,8 @@ var unloadCmd = &cobra.Command{
 
 Find the process by model name (basename of the GGUF file) or by
 specifying a port with --port.`,
-	Args:  cobra.ExactArgs(1),
-	RunE:  runUnload,
+	Args: cobra.ExactArgs(1),
+	RunE: runUnload,
 }
 
 // portFlag is used to find a process by port during unload
@@ -168,17 +168,6 @@ var inspectCmd = &cobra.Command{
 	Short: "Show GGUF metadata and hardware recommendations",
 	Args:  cobra.ExactArgs(1),
 	RunE:  runInspect,
-}
-
-// --- pull ---
-
-var pullCmd = &cobra.Command{
-	Use:   "pull <org/repo:quant>",
-	Short: "Pull a GGUF from HuggingFace",
-	Args:  cobra.ExactArgs(1),
-	RunE: func(cmd *cobra.Command, args []string) error {
-		return fmt.Errorf("not implemented yet — coming in S2+")
-	},
 }
 
 // --- runtime ---
@@ -360,7 +349,7 @@ func runLoad(cmd *cobra.Command, args []string) error {
 
 		// Device selection reasoning
 		fileSizeMB := uint64(meta.FileSizeBytes) / 1024 / 1024
-		requiredVRAM := fileSizeMB + (fileSizeMB * 20) / 100
+		requiredVRAM := fileSizeMB + (fileSizeMB*20)/100
 		fmt.Println(GPUReasoning(inv, requiredVRAM))
 		fmt.Println()
 
