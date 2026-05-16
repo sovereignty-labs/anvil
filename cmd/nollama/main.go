@@ -5,10 +5,14 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"sort"
 	"strings"
 	"syscall"
+	"text/tabwriter"
 	"time"
 
+	"github.com/hirdforge/nollama/internal/config"
+	"github.com/hirdforge/nollama/internal/federation"
 	"github.com/hirdforge/nollama/internal/hardware"
 	"github.com/hirdforge/nollama/internal/model"
 	"github.com/hirdforge/nollama/internal/process"
@@ -186,34 +190,26 @@ var remoteAddCmd = &cobra.Command{
 	Use:   "add <name> <url>",
 	Short: "Register a remote nollama node",
 	Args:  cobra.ExactArgs(2),
-	RunE: func(cmd *cobra.Command, args []string) error {
-		return fmt.Errorf("not implemented yet — Phase 2")
-	},
+	RunE:  runRemoteAdd,
 }
 
 var remoteListCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List registered remote nodes",
-	RunE: func(cmd *cobra.Command, args []string) error {
-		return fmt.Errorf("not implemented yet — Phase 2")
-	},
+	RunE:  runRemoteList,
 }
 
 var remoteRmCmd = &cobra.Command{
 	Use:   "rm <name>",
 	Short: "Remove a remote node",
 	Args:  cobra.ExactArgs(1),
-	RunE: func(cmd *cobra.Command, args []string) error {
-		return fmt.Errorf("not implemented yet — Phase 2")
-	},
+	RunE:  runRemoteRm,
 }
 
 var remotePingCmd = &cobra.Command{
 	Use:   "ping",
 	Short: "Health-check all remote nodes",
-	RunE: func(cmd *cobra.Command, args []string) error {
-		return fmt.Errorf("not implemented yet — Phase 2")
-	},
+	RunE:  runRemotePing,
 }
 
 // --- rm ---
@@ -408,6 +404,124 @@ func GPUReasoning(inv *hardware.Inventory, requiredVRAM uint64) string {
 // FormatMB is a wrapper for process.FormatMB.
 func FormatMB(mb uint64) string {
 	return process.FormatMB(mb)
+}
+
+func runRemoteAdd(_ *cobra.Command, args []string) error {
+	path := federation.DefaultRegistryPath()
+	registry, err := federation.LoadRegistry(path)
+	if err != nil {
+		return err
+	}
+
+	if err := registry.Add(args[0], args[1]); err != nil {
+		return err
+	}
+	if err := registry.Save(path); err != nil {
+		return err
+	}
+
+	fmt.Printf("Added remote %s: %s\n", args[0], registry.Remotes[args[0]].URL)
+	return nil
+}
+
+func runRemoteRm(_ *cobra.Command, args []string) error {
+	path := federation.DefaultRegistryPath()
+	registry, err := federation.LoadRegistry(path)
+	if err != nil {
+		return err
+	}
+
+	if err := registry.Remove(args[0]); err != nil {
+		return err
+	}
+	if err := registry.Save(path); err != nil {
+		return err
+	}
+
+	fmt.Printf("Removed remote %s\n", args[0])
+	return nil
+}
+
+func runRemoteList(_ *cobra.Command, _ []string) error {
+	registry, cfgRemotes, err := loadFederatedRemotes()
+	if err != nil {
+		return err
+	}
+
+	merged := federation.MergeRemotes(registry, cfgRemotes)
+	if len(merged) == 0 {
+		fmt.Println("No remotes registered. Add one: nollama remote add <name> <url>")
+		return nil
+	}
+
+	names := sortedRemoteNames(merged)
+	w := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
+	fmt.Fprintln(w, "NAME\tURL\tSOURCE")
+	for _, name := range names {
+		source := "cli"
+		if _, ok := cfgRemotes[name]; ok {
+			source = "config"
+		}
+		fmt.Fprintf(w, "%s\t%s\t%s\n", name, merged[name], source)
+	}
+	return w.Flush()
+}
+
+func runRemotePing(_ *cobra.Command, _ []string) error {
+	registry, cfgRemotes, err := loadFederatedRemotes()
+	if err != nil {
+		return err
+	}
+
+	merged := federation.MergeRemotes(registry, cfgRemotes)
+	if len(merged) == 0 {
+		fmt.Println("No remotes registered. Add one: nollama remote add <name> <url>")
+		return nil
+	}
+
+	names := sortedRemoteNames(merged)
+	w := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
+	fmt.Fprintln(w, "NAME\tURL\tSTATUS\tLATENCY")
+	for _, name := range names {
+		latency, err := federation.PingRemote(merged[name])
+		status := "ok"
+		latencyText := latency.String()
+		if err != nil {
+			status = fmt.Sprintf("error: %v", err)
+			latencyText = "—"
+		}
+		fmt.Fprintf(w, "%s\t%s\t%s\t%s\n", name, merged[name], status, latencyText)
+	}
+	return w.Flush()
+}
+
+func loadFederatedRemotes() (*federation.RemoteRegistry, map[string]config.Remote, error) {
+	registry, err := federation.LoadRegistry(federation.DefaultRegistryPath())
+	if err != nil {
+		return nil, nil, err
+	}
+
+	cfgRemotes := map[string]config.Remote{}
+	if cfgPath := config.FindConfig(); cfgPath != "" {
+		cfg, err := config.Load(cfgPath)
+		if err != nil {
+			return nil, nil, err
+		}
+		if cfg.Remotes != nil {
+			cfgRemotes = cfg.Remotes
+		}
+	}
+
+	return registry, cfgRemotes, nil
+}
+
+func sortedRemoteNames(remotes map[string]string) []string {
+	names := make([]string, 0, len(remotes))
+	for name := range remotes {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
 }
 
 func init() {
