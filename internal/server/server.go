@@ -62,6 +62,12 @@ func (s *Server) Run(ctx context.Context) error {
 		"model_dir", s.cfg.ModelDir,
 	)
 
+	// Register signal handlers before any long startup work so SIGHUP is
+	// intercepted even while the daemon is still booting.
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, syscall.SIGTERM, syscall.SIGINT, syscall.SIGHUP)
+	defer signal.Stop(sigCh)
+
 	// Detect hardware
 	hw := s.detectHardware()
 
@@ -88,10 +94,6 @@ func (s *Server) Run(ctx context.Context) error {
 	}
 	s.logger.Info("listening", "addr", ln.Addr().String())
 
-	// Signal handling
-	sigCh := make(chan os.Signal, 1)
-	signal.Notify(sigCh, syscall.SIGTERM, syscall.SIGINT, syscall.SIGHUP)
-
 	// Start serving in background
 	errCh := make(chan error, 1)
 	go func() {
@@ -105,37 +107,13 @@ func (s *Server) Run(ctx context.Context) error {
 	)
 
 	// Wait for signal or context cancellation
-	select {
-	case sig := <-sigCh:
-		switch sig {
-		case syscall.SIGHUP:
-			s.logger.Info("SIGHUP received, reloading config")
-			if err := s.reload(); err != nil {
-				s.logger.Error("config reload failed", "error", err)
-			}
-			// After reload, continue waiting
-			return s.waitForShutdown(sigCh, errCh)
-		default:
-			s.logger.Info("shutdown signal received", "signal", sig)
-			return s.shutdown()
-		}
-	case err := <-errCh:
-		return fmt.Errorf("http server error: %w", err)
-	case <-ctx.Done():
-		s.logger.Info("context cancelled, shutting down")
-		return s.shutdown()
-	}
-}
-
-// waitForShutdown continues the signal loop after a SIGHUP reload.
-func (s *Server) waitForShutdown(sigCh chan os.Signal, errCh chan error) error {
 	for {
 		select {
 		case sig := <-sigCh:
 			switch sig {
 			case syscall.SIGHUP:
 				s.logger.Info("SIGHUP received, reloading config")
-				if err := s.reload(); err != nil {
+				if err := s.reloadConfig(); err != nil {
 					s.logger.Error("config reload failed", "error", err)
 				}
 				continue
@@ -145,6 +123,9 @@ func (s *Server) waitForShutdown(sigCh chan os.Signal, errCh chan error) error {
 			}
 		case err := <-errCh:
 			return fmt.Errorf("http server error: %w", err)
+		case <-ctx.Done():
+			s.logger.Info("context cancelled, shutting down")
+			return s.shutdown()
 		}
 	}
 }
@@ -169,8 +150,8 @@ func (s *Server) shutdown() error {
 	return nil
 }
 
-// reload re-reads the config file and reconciles state.
-func (s *Server) reload() error {
+// reloadConfig re-reads the config file and reconciles state.
+func (s *Server) reloadConfig() error {
 	if s.cfgPath == "" {
 		return fmt.Errorf("no config file to reload (started without --config)")
 	}
