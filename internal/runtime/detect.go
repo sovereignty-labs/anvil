@@ -94,16 +94,21 @@ func scoreAsset(asset ReleaseAsset, platform Platform) (int, bool) {
 	}
 
 	cuda := strings.Contains(name, "cuda")
+	rocm := strings.Contains(name, "rocm") || strings.Contains(name, "hip")
 	score := 0
 	if platform.CUDA != "" {
 		if cuda {
 			score += 200
+		} else if rocm {
+			score += 10
 		} else {
 			score += 100
 		}
 	} else {
 		if cuda {
 			score += 20
+		} else if rocm {
+			score += 100
 		} else {
 			score += 200
 		}
