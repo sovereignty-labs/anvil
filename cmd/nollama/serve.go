@@ -1,0 +1,96 @@
+package main
+
+import (
+	"context"
+	"fmt"
+	"log/slog"
+	"os"
+
+	"github.com/hirdforge/nollama/internal/config"
+	"github.com/hirdforge/nollama/internal/server"
+	"github.com/spf13/cobra"
+)
+
+var serveCmd = &cobra.Command{
+	Use:   "serve",
+	Short: "Run nollama as a daemon",
+	Long: `Run nollama as a long-running daemon that manages llama-server processes.
+
+With --config, loads a config file and autoloads models on startup.
+Without --config, starts with defaults and waits for load commands.
+
+Signals:
+  SIGTERM/SIGINT  Graceful shutdown (stops all models)
+  SIGHUP          Reload config (reconciles model state)`,
+	RunE: runServe,
+}
+
+var (
+	serveConfigPath string
+	serveBind       string
+)
+
+func init() {
+	serveCmd.Flags().StringVar(&serveConfigPath, "config", "", "Path to config file")
+	serveCmd.Flags().StringVar(&serveBind, "bind", "", "Listen address (overrides config)")
+}
+
+func runServe(cmd *cobra.Command, args []string) error {
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{
+		Level: slog.LevelInfo,
+	}))
+
+	// Load config
+	var cfg *config.Config
+	var cfgPath string
+
+	if serveConfigPath != "" {
+		// Explicit config file
+		var err error
+		cfg, err = config.Load(serveConfigPath)
+		if err != nil {
+			return fmt.Errorf("load config: %w", err)
+		}
+		cfgPath = serveConfigPath
+		logger.Info("config loaded", "path", serveConfigPath)
+	} else {
+		// Try standard locations
+		cfgPath = config.FindConfig()
+		if cfgPath != "" {
+			var err error
+			cfg, err = config.Load(cfgPath)
+			if err != nil {
+				return fmt.Errorf("load config %s: %w", cfgPath, err)
+			}
+			logger.Info("config found", "path", cfgPath)
+		} else {
+			cfg = config.DefaultConfig()
+			logger.Info("no config file found, using defaults")
+		}
+	}
+
+	// CLI flags override config
+	if serveBind != "" {
+		cfg.Bind = serveBind
+	}
+
+	// llama-server path from persistent flag or env
+	if llamaServer, _ := cmd.Flags().GetString("llama-server"); llamaServer != "" {
+		cfg.LlamaServer = llamaServer
+	} else if envPath := os.Getenv("NOLLAMA_LLAMA_SERVER"); envPath != "" && cfg.LlamaServer == "" {
+		cfg.LlamaServer = envPath
+	}
+
+	// Verify model_dir exists
+	if cfg.ModelDir != "" {
+		if _, err := os.Stat(cfg.ModelDir); os.IsNotExist(err) {
+			logger.Warn("model_dir does not exist, creating", "path", cfg.ModelDir)
+			if err := os.MkdirAll(cfg.ModelDir, 0755); err != nil {
+				return fmt.Errorf("create model_dir %s: %w", cfg.ModelDir, err)
+			}
+		}
+	}
+
+	srv := server.NewServer(cfg, cfgPath, logger)
+	return srv.Run(context.Background())
+}
