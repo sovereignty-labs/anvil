@@ -63,6 +63,37 @@ func TestSelectAsset(t *testing.T) {
 	}
 }
 
+func TestSelectAssetPrefersCudaOverRocmOnNvidia(t *testing.T) {
+	assets := []ReleaseAsset{
+		{Name: "llama-b9174-bin-ubuntu-x64.zip", Size: 100},
+		{Name: "llama-b9174-bin-ubuntu-x64-rocm-6.2.tar.gz", Size: 500},
+		{Name: "llama-b9174-bin-ubuntu-x64-cuda-cu12.8.0.zip", Size: 200},
+	}
+
+	selected, err := SelectAsset(assets, Platform{OS: "linux", Arch: "amd64", CUDA: "available"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if selected.Name != "llama-b9174-bin-ubuntu-x64-cuda-cu12.8.0.zip" {
+		t.Fatalf("cuda selection = %q", selected.Name)
+	}
+}
+
+func TestSelectAssetPrefersCpuOverRocmWithoutCuda(t *testing.T) {
+	assets := []ReleaseAsset{
+		{Name: "llama-b9174-bin-ubuntu-x64.zip", Size: 100},
+		{Name: "llama-b9174-bin-ubuntu-x64-rocm-6.2.tar.gz", Size: 500},
+	}
+
+	selected, err := SelectAsset(assets, Platform{OS: "linux", Arch: "amd64"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if selected.Name != "llama-b9174-bin-ubuntu-x64.zip" {
+		t.Fatalf("cpu selection = %q", selected.Name)
+	}
+}
+
 func TestResolveActiveRuntime(t *testing.T) {
 	dir := t.TempDir()
 	mgr := &Manager{runtimesDir: dir}
