@@ -110,6 +110,33 @@ func TestHandleUnloadBadMethod(t *testing.T) {
 	}
 }
 
+func TestHandlePullBadMethod(t *testing.T) {
+	cfg := config.DefaultConfig()
+	srv := NewServer(cfg, "", nil)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/pull", nil)
+	rr := httptest.NewRecorder()
+	srv.handlePull(rr, req)
+
+	if rr.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("status = %d, want %d", rr.Code, http.StatusMethodNotAllowed)
+	}
+}
+
+func TestHandlePullInvalidSpec(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.ModelDir = t.TempDir()
+	srv := NewServer(cfg, "", nil)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/pull", bytes.NewBufferString(`{"spec":"bad-spec"}`))
+	rr := httptest.NewRecorder()
+	srv.handlePull(rr, req)
+
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d", rr.Code, http.StatusBadRequest)
+	}
+}
+
 func TestHandleUploadSuccess(t *testing.T) {
 	dir := t.TempDir()
 	cfg := config.DefaultConfig()

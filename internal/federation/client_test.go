@@ -253,3 +253,54 @@ func TestClientUploadModel(t *testing.T) {
 		t.Fatalf("body = %q, want abc", gotBody)
 	}
 }
+
+func TestClientPull(t *testing.T) {
+	var seenBody []byte
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/api/pull" {
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Fatal(err)
+		}
+		seenBody = body
+		_ = json.NewEncoder(w).Encode(PullResponse{
+			Filename: "Qwen3.6-35B-A3B-GGUF-Q4_K_S.gguf",
+			Size:     12345,
+		})
+	}))
+	defer srv.Close()
+
+	client := NewClient(srv.URL)
+	resp, err := client.Pull("unsloth/Qwen3.6-35B-A3B-GGUF:Q4_K_S")
+	if err != nil {
+		t.Fatalf("Pull failed: %v", err)
+	}
+	if resp.Filename != "Qwen3.6-35B-A3B-GGUF-Q4_K_S.gguf" || resp.Size != 12345 {
+		t.Fatalf("unexpected pull response: %+v", resp)
+	}
+
+	var req struct {
+		Spec string `json:"spec"`
+	}
+	if err := json.Unmarshal(seenBody, &req); err != nil {
+		t.Fatalf("unmarshal request body: %v", err)
+	}
+	if req.Spec != "unsloth/Qwen3.6-35B-A3B-GGUF:Q4_K_S" {
+		t.Fatalf("spec = %q, want pull spec", req.Spec)
+	}
+}
+
+func TestClientPullError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "invalid spec"})
+	}))
+	defer srv.Close()
+
+	client := NewClient(srv.URL)
+	if _, err := client.Pull("bad-spec"); err == nil {
+		t.Fatal("expected pull error")
+	}
+}

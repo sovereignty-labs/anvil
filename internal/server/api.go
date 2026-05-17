@@ -16,6 +16,7 @@ import (
 	"github.com/hirdforge/nollama/internal/hardware"
 	"github.com/hirdforge/nollama/internal/model"
 	"github.com/hirdforge/nollama/internal/process"
+	"github.com/hirdforge/nollama/internal/pull"
 	runtimemgr "github.com/hirdforge/nollama/internal/runtime"
 )
 
@@ -57,6 +58,15 @@ type modelSummary struct {
 
 type modelsResponse struct {
 	Models []modelSummary `json:"models"`
+}
+
+type pullRequest struct {
+	Spec string `json:"spec"`
+}
+
+type pullResponse struct {
+	Filename string `json:"filename"`
+	Size     int64  `json:"size"`
 }
 
 type uploadConflictResponse struct {
@@ -161,6 +171,56 @@ func (s *Server) handleUpload(w http.ResponseWriter, r *http.Request) {
 		Filename: filename,
 		Size:     written,
 		SHA256:   hex.EncodeToString(hasher.Sum(nil)),
+	})
+}
+
+func (s *Server) handlePull(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeMethodNotAllowed(w, http.MethodPost)
+		return
+	}
+
+	var req pullRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeAPIError(w, http.StatusBadRequest, "invalid JSON body")
+		return
+	}
+	req.Spec = strings.TrimSpace(req.Spec)
+	if req.Spec == "" {
+		writeAPIError(w, http.StatusBadRequest, "spec is required")
+		return
+	}
+
+	if _, err := pull.ParseSpec(req.Spec); err != nil {
+		writeAPIError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	modelDir := s.cfg.ModelDir
+	if modelDir == "" {
+		writeAPIError(w, http.StatusInternalServerError, "model directory is required")
+		return
+	}
+
+	token := os.Getenv("HF_TOKEN")
+	resultPath, err := pull.Pull(req.Spec, pull.PullOpts{
+		ModelDir: modelDir,
+		HFToken:  token,
+	})
+	if err != nil {
+		writeAPIError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	info, err := os.Stat(resultPath)
+	if err != nil {
+		writeAPIError(w, http.StatusInternalServerError, fmt.Sprintf("stat downloaded file %s: %v", resultPath, err))
+		return
+	}
+
+	writeJSON(w, http.StatusOK, pullResponse{
+		Filename: filepath.Base(resultPath),
+		Size:     info.Size(),
 	})
 }
 
