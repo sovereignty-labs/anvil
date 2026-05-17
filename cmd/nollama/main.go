@@ -2,6 +2,7 @@ package main
 
 import (
 	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"io"
 	"os"
@@ -587,11 +588,17 @@ func runCP(cmd *cobra.Command, args []string) error {
 	defer close(done)
 	go reportCopyProgress(done, info.Filename, info.SizeBytes, counting)
 
-	if err := remote.UploadModel(info.Filename, counting, info.SizeBytes, ""); err != nil {
+	remoteSHA, err := remote.UploadModel(info.Filename, counting, info.SizeBytes, "")
+	if err != nil {
 		return err
 	}
 
-	fmt.Printf("Copied %s to %s (%s)\n", info.Filename, target, humanSize(info.SizeBytes))
+	localSHA := hex.EncodeToString(hasher.Sum(nil))
+	if localSHA != remoteSHA {
+		return fmt.Errorf("integrity check failed: local sha256 %s != remote %s", localSHA, remoteSHA)
+	}
+
+	fmt.Printf("Copied %s to %s (%s, sha256: %s)\n", info.Filename, target, humanSize(info.SizeBytes), localSHA)
 	return nil
 }
 

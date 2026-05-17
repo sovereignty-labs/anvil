@@ -137,6 +137,9 @@ func TestHandleUploadSuccess(t *testing.T) {
 	if resp.Filename != "gpu-host.gguf" || resp.Size != 3 {
 		t.Fatalf("unexpected response: %+v", resp)
 	}
+	if resp.SHA256 != hex.EncodeToString(sum[:]) {
+		t.Fatalf("sha256 = %q, want %q", resp.SHA256, hex.EncodeToString(sum[:]))
+	}
 
 	data, err := os.ReadFile(filepath.Join(dir, "gpu-host.gguf"))
 	if err != nil {

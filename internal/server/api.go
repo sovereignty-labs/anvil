@@ -67,6 +67,7 @@ type uploadConflictResponse struct {
 type uploadResponse struct {
 	Filename string `json:"filename"`
 	Size     int64  `json:"size"`
+	SHA256   string `json:"sha256"`
 }
 
 func (s *Server) handleUpload(w http.ResponseWriter, r *http.Request) {
@@ -159,6 +160,7 @@ func (s *Server) handleUpload(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, uploadResponse{
 		Filename: filename,
 		Size:     written,
+		SHA256:   hex.EncodeToString(hasher.Sum(nil)),
 	})
 }
 

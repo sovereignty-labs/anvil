@@ -226,13 +226,18 @@ func TestClientUploadModel(t *testing.T) {
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"filename": gotFilename,
 			"size":     len(body),
+			"sha256":   "beefcafe",
 		})
 	}))
 	defer srv.Close()
 
 	client := NewClient(srv.URL)
-	if err := client.UploadModel("gpu-host.gguf", bytes.NewBufferString("abc"), 3, "deadbeef"); err != nil {
+	sha, err := client.UploadModel("gpu-host.gguf", bytes.NewBufferString("abc"), 3, "deadbeef")
+	if err != nil {
 		t.Fatalf("UploadModel failed: %v", err)
+	}
+	if sha != "beefcafe" {
+		t.Fatalf("sha256 = %q, want beefcafe", sha)
 	}
 
 	if gotFilename != "gpu-host.gguf" {
