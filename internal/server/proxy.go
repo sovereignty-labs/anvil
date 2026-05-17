@@ -27,6 +27,20 @@ type Route struct {
 
 	// Port is the llama-server port.
 	Port int
+
+	// LastRequest is updated on every proxied request. Initialized at load time.
+	LastRequest time.Time
+
+	// RequestCount is the total number of requests proxied through this route.
+	RequestCount int64
+}
+
+// RouteStats is a snapshot of a route for metrics exposition.
+type RouteStats struct {
+	ModelName    string
+	Port         int
+	LastRequest  time.Time
+	RequestCount int64
 }
 
 // Proxy is an HTTP reverse proxy that routes requests by model name.
@@ -59,9 +73,10 @@ func (p *Proxy) AddRoute(modelFilename string, port int) {
 	backend, _ := url.Parse(fmt.Sprintf("http://127.0.0.1:%d", port))
 
 	route := &Route{
-		ModelName:  modelFilename,
-		BackendURL: backend,
-		Port:       port,
+		ModelName:   modelFilename,
+		BackendURL:  backend,
+		Port:        port,
+		LastRequest: time.Now(),
 	}
 
 	p.mu.Lock()
@@ -97,6 +112,41 @@ func (p *Proxy) RouteCount() int {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
 	return len(p.routes)
+}
+
+// LRURoute returns the route with the oldest LastRequest, or nil if no routes exist.
+func (p *Proxy) LRURoute() *Route {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+
+	if len(p.all) == 0 {
+		return nil
+	}
+
+	var lru *Route
+	for _, r := range p.all {
+		if lru == nil || r.LastRequest.Before(lru.LastRequest) {
+			lru = r
+		}
+	}
+	return lru
+}
+
+// RouteStatsList returns a snapshot of all routes for metrics exposition.
+func (p *Proxy) RouteStatsList() []RouteStats {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+
+	stats := make([]RouteStats, 0, len(p.all))
+	for _, r := range p.all {
+		stats = append(stats, RouteStats{
+			ModelName:    r.ModelName,
+			Port:         r.Port,
+			LastRequest:  r.LastRequest,
+			RequestCount: r.RequestCount,
+		})
+	}
+	return stats
 }
 
 func (p *Proxy) rebuildAllLocked() {
@@ -198,6 +248,12 @@ func (p *Proxy) handleProxy(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
+
+	// Update request tracking
+	p.mu.Lock()
+	route.LastRequest = time.Now()
+	route.RequestCount++
+	p.mu.Unlock()
 
 	// Restore body for proxying
 	r.Body = io.NopCloser(bytes.NewReader(bodyBytes))

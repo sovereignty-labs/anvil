@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestProxySingleModelRoutesEverything(t *testing.T) {
@@ -240,6 +241,98 @@ func TestProxyRemoveRoute(t *testing.T) {
 
 	if p.RouteCount() != 1 {
 		t.Fatalf("expected 1 route after removal, got %d", p.RouteCount())
+	}
+}
+
+func TestProxyLRURouteEmpty(t *testing.T) {
+	p := NewProxy(nil)
+	if lru := p.LRURoute(); lru != nil {
+		t.Errorf("expected nil LRURoute with no routes, got %v", lru)
+	}
+}
+
+func TestProxyLRURouteOldestWins(t *testing.T) {
+	p := NewProxy(nil)
+	p.AddRoute("model-a.gguf", 11111)
+	// AddRoute sets LastRequest to time.Now(); back-date the first one.
+	p.mu.Lock()
+	for _, r := range p.all {
+		if r.ModelName == "model-a.gguf" {
+			r.LastRequest = time.Now().Add(-1 * time.Hour)
+		}
+	}
+	p.mu.Unlock()
+
+	p.AddRoute("model-b.gguf", 22222)
+
+	lru := p.LRURoute()
+	if lru == nil {
+		t.Fatal("expected an LRU route, got nil")
+	}
+	if lru.ModelName != "model-a.gguf" {
+		t.Errorf("expected model-a.gguf as LRU, got %s", lru.ModelName)
+	}
+}
+
+func TestProxyRouteStatsList(t *testing.T) {
+	p := NewProxy(nil)
+	p.AddRoute("model-a.gguf", 11111)
+	p.AddRoute("model-b.gguf", 22222)
+
+	stats := p.RouteStatsList()
+	if len(stats) != 2 {
+		t.Fatalf("expected 2 stats entries, got %d", len(stats))
+	}
+	names := map[string]bool{}
+	for _, st := range stats {
+		names[st.ModelName] = true
+		if st.LastRequest.IsZero() {
+			t.Errorf("route %s has zero LastRequest", st.ModelName)
+		}
+		if st.RequestCount != 0 {
+			t.Errorf("route %s should start with 0 requests, got %d", st.ModelName, st.RequestCount)
+		}
+	}
+	if !names["model-a.gguf"] || !names["model-b.gguf"] {
+		t.Errorf("missing expected models in stats: %v", names)
+	}
+}
+
+func TestProxyRequestTrackingUpdates(t *testing.T) {
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(`{"ok":true}`))
+	}))
+	defer backend.Close()
+
+	p := NewProxy(nil)
+	p.AddRoute("model-a.gguf", extractPort(backend.URL))
+
+	// Force the initial LastRequest into the past so we can detect an update.
+	p.mu.Lock()
+	origTime := time.Now().Add(-1 * time.Hour)
+	for _, r := range p.all {
+		r.LastRequest = origTime
+	}
+	p.mu.Unlock()
+
+	body := `{"model":"model-a","messages":[]}`
+	req := httptest.NewRequest("POST", "/v1/chat/completions", strings.NewReader(body))
+	rec := httptest.NewRecorder()
+	p.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	stats := p.RouteStatsList()
+	if len(stats) != 1 {
+		t.Fatalf("expected 1 stats entry, got %d", len(stats))
+	}
+	if stats[0].RequestCount != 1 {
+		t.Errorf("expected RequestCount=1 after one request, got %d", stats[0].RequestCount)
+	}
+	if !stats[0].LastRequest.After(origTime) {
+		t.Errorf("expected LastRequest to be updated past %v, got %v", origTime, stats[0].LastRequest)
 	}
 }
 

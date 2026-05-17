@@ -726,6 +726,10 @@ func buildRemoteLoadRequest(cmd *cobra.Command, modelPath string) (federation.Lo
 	if err != nil {
 		return federation.LoadRequest{}, nil, nil, err
 	}
+	swap, err := cmd.Flags().GetBool("swap")
+	if err != nil {
+		return federation.LoadRequest{}, nil, nil, err
+	}
 	overlayFlags, appliedProfiles, warnings, err := resolveLoadOverlay(cmd)
 	if err != nil {
 		return federation.LoadRequest{}, nil, nil, err
@@ -735,6 +739,7 @@ func buildRemoteLoadRequest(cmd *cobra.Command, modelPath string) (federation.Lo
 		Model: filepath.Base(modelPath),
 		CPU:   cpu,
 		Flags: overlayFlags,
+		Swap:  swap,
 	}
 	if !cpu && gpu >= 0 {
 		req.GPU = &gpu

@@ -76,5 +76,6 @@ func newLoadTestCommand(t *testing.T) *cobra.Command {
 	cmd.Flags().StringSlice("profile", nil, "")
 	cmd.Flags().Int("gpu", -1, "")
 	cmd.Flags().Bool("cpu", false, "")
+	cmd.Flags().Bool("swap", false, "")
 	return cmd
 }
