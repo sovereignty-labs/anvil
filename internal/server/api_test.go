@@ -137,6 +137,65 @@ func TestHandlePullInvalidSpec(t *testing.T) {
 	}
 }
 
+func TestHandleRmSuccess(t *testing.T) {
+	dir := t.TempDir()
+	cfg := config.DefaultConfig()
+	cfg.ModelDir = dir
+	srv := NewServer(cfg, "", nil)
+
+	path := filepath.Join(dir, "gpu-host.gguf")
+	if err := os.WriteFile(path, []byte("abc"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	req := httptest.NewRequest(http.MethodDelete, "/api/rm", bytes.NewBufferString(`{"model":"gpu-host"}`))
+	rr := httptest.NewRecorder()
+	srv.handleRm(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rr.Code, http.StatusOK)
+	}
+
+	var resp rmResponse
+	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if !resp.Deleted || resp.Filename != "gpu-host.gguf" {
+		t.Fatalf("unexpected response: %+v", resp)
+	}
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatalf("expected file to be deleted, stat err=%v", err)
+	}
+}
+
+func TestHandleRmNotFound(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.ModelDir = t.TempDir()
+	srv := NewServer(cfg, "", nil)
+
+	req := httptest.NewRequest(http.MethodDelete, "/api/rm", bytes.NewBufferString(`{"model":"missing"}`))
+	rr := httptest.NewRecorder()
+	srv.handleRm(rr, req)
+
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d", rr.Code, http.StatusBadRequest)
+	}
+}
+
+func TestHandleRmBadMethod(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.ModelDir = t.TempDir()
+	srv := NewServer(cfg, "", nil)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/rm", nil)
+	rr := httptest.NewRecorder()
+	srv.handleRm(rr, req)
+
+	if rr.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("status = %d, want %d", rr.Code, http.StatusMethodNotAllowed)
+	}
+}
+
 func TestHandleUploadSuccess(t *testing.T) {
 	dir := t.TempDir()
 	cfg := config.DefaultConfig()

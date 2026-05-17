@@ -76,6 +76,11 @@ type PullResponse struct {
 	Size     int64  `json:"size"`
 }
 
+type RmResponse struct {
+	Filename string `json:"filename"`
+	Deleted  bool   `json:"deleted"`
+}
+
 // UnloadRequest mirrors internal/server.unloadRequest.
 type UnloadRequest struct {
 	Model string `json:"model"`
@@ -192,6 +197,13 @@ func (c *Client) Pull(spec string) (*PullResponse, error) {
 		return nil, fmt.Errorf("decoding response from /api/pull: %w", err)
 	}
 	return &out, nil
+}
+
+// Rm deletes a model from the remote node.
+func (c *Client) Rm(model string) error {
+	return c.doJSON(http.MethodPost, "/api/rm", struct {
+		Model string `json:"model"`
+	}{Model: model}, nil)
 }
 
 // CheckModelExists checks whether the remote node already has a model file.
