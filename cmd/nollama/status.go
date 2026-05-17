@@ -50,7 +50,7 @@ func runStatus(cmd *cobra.Command, _ []string) error {
 		return err
 	}
 
-	localURL := resolveStatusDaemonAddr()
+	localURL := "http://" + resolveStatusDaemonAddr()
 	mergedRemotes := federation.MergeRemotes(registry, cfgRemotes)
 	targets := []nodeTarget{{Name: "local", URL: localURL}}
 	remoteNames := sortedRemoteNames(mergedRemotes)
