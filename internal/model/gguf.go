@@ -2,6 +2,7 @@
 package model
 
 import (
+	"bufio"
 	"encoding/binary"
 	"fmt"
 	"io"
@@ -132,11 +133,15 @@ func ParseGGUF(path string) (*GGUFMetadata, error) {
 		KV:            make(map[string]any),
 	}
 
-	r := &ggufReader{r: f, order: binary.LittleEndian}
+	// Buffer reads — GGUF headers have hundreds of small KV reads.
+	// 128KB buffer collapses thousands of syscalls into a few reads.
+	br := bufio.NewReaderSize(f, 128*1024)
+
+	r := &ggufReader{r: br, order: binary.LittleEndian}
 
 	// Magic
 	var magic [4]byte
-	if err := binary.Read(f, binary.LittleEndian, &magic); err != nil {
+	if _, err := io.ReadFull(br, magic[:]); err != nil {
 		return nil, fmt.Errorf("read magic: %w", err)
 	}
 	if magic != ggufMagic {
