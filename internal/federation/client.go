@@ -178,11 +178,8 @@ func (c *Client) UploadModel(filename string, reader io.Reader, size int64, sha2
 		req.ContentLength = size
 	}
 
-	client := c.HTTPClient
-	if client == nil {
-		// Uploads may take minutes for multi-GB GGUFs, so avoid a fixed deadline.
-		client = &http.Client{Timeout: 0}
-	}
+	// Uploads may take minutes for multi-GB GGUFs; always use a no-timeout client.
+	client := &http.Client{Timeout: 0}
 
 	resp, err := client.Do(req)
 	if err != nil {
