@@ -2,6 +2,8 @@ package server
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -105,5 +107,97 @@ func TestHandleUnloadBadMethod(t *testing.T) {
 
 	if rr.Code != http.StatusMethodNotAllowed {
 		t.Fatalf("status = %d, want %d", rr.Code, http.StatusMethodNotAllowed)
+	}
+}
+
+func TestHandleUploadSuccess(t *testing.T) {
+	dir := t.TempDir()
+	cfg := config.DefaultConfig()
+	cfg.ModelDir = dir
+	srv := NewServer(cfg, "", nil)
+
+	body := []byte("abc")
+	sum := sha256.Sum256(body)
+	req := httptest.NewRequest(http.MethodPost, "/api/upload", bytes.NewReader(body))
+	req.Header.Set("X-Filename", "gpu-host.gguf")
+	req.Header.Set("X-Content-Length", "3")
+	req.Header.Set("X-SHA256", hex.EncodeToString(sum[:]))
+	rr := httptest.NewRecorder()
+
+	srv.handleUpload(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rr.Code, http.StatusOK)
+	}
+
+	var resp uploadResponse
+	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if resp.Filename != "gpu-host.gguf" || resp.Size != 3 {
+		t.Fatalf("unexpected response: %+v", resp)
+	}
+	if resp.SHA256 != hex.EncodeToString(sum[:]) {
+		t.Fatalf("sha256 = %q, want %q", resp.SHA256, hex.EncodeToString(sum[:]))
+	}
+
+	data, err := os.ReadFile(filepath.Join(dir, "gpu-host.gguf"))
+	if err != nil {
+		t.Fatalf("read uploaded file: %v", err)
+	}
+	if string(data) != "abc" {
+		t.Fatalf("file contents = %q, want abc", data)
+	}
+}
+
+func TestHandleUploadConflict(t *testing.T) {
+	dir := t.TempDir()
+	cfg := config.DefaultConfig()
+	cfg.ModelDir = dir
+	srv := NewServer(cfg, "", nil)
+
+	if err := os.WriteFile(filepath.Join(dir, "gpu-host.gguf"), []byte("abc"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/api/upload", bytes.NewBufferString("abc"))
+	req.Header.Set("X-Filename", "gpu-host.gguf")
+	req.Header.Set("X-Content-Length", "3")
+	rr := httptest.NewRecorder()
+
+	srv.handleUpload(rr, req)
+
+	if rr.Code != http.StatusConflict {
+		t.Fatalf("status = %d, want %d", rr.Code, http.StatusConflict)
+	}
+
+	var resp uploadConflictResponse
+	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if resp.Error != "already exists" || resp.Filename != "gpu-host.gguf" {
+		t.Fatalf("unexpected response: %+v", resp)
+	}
+}
+
+func TestHandleUploadSHA256Mismatch(t *testing.T) {
+	dir := t.TempDir()
+	cfg := config.DefaultConfig()
+	cfg.ModelDir = dir
+	srv := NewServer(cfg, "", nil)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/upload", bytes.NewBufferString("abc"))
+	req.Header.Set("X-Filename", "gpu-host.gguf")
+	req.Header.Set("X-Content-Length", "3")
+	req.Header.Set("X-SHA256", "deadbeef")
+	rr := httptest.NewRecorder()
+
+	srv.handleUpload(rr, req)
+
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d", rr.Code, http.StatusBadRequest)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "gpu-host.gguf.partial")); !os.IsNotExist(err) {
+		t.Fatalf("expected partial file to be cleaned up, stat err=%v", err)
 	}
 }

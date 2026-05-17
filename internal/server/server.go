@@ -86,6 +86,7 @@ func (s *Server) Run(ctx context.Context) error {
 	mux.HandleFunc("/api/load", s.handleLoad)
 	mux.HandleFunc("/api/unload", s.handleUnload)
 	mux.HandleFunc("/api/models", s.handleModels)
+	mux.HandleFunc("/api/upload", s.handleUpload)
 	mux.HandleFunc("/api/status", s.handleStatus)
 	mux.Handle("/", s.proxy)
 	s.httpServer = &http.Server{
