@@ -272,7 +272,7 @@ func (s *Server) loadModel(entry config.AutoloadEntry, hw *hardware.Inventory) (
 			"warning", warning,
 		)
 	}
-	opts.ExtraFlags = flagsMapToSlice(merged)
+	opts.ExtraFlags = config.FlagsMapToSlice(merged)
 
 	// Hardware for smart defaults
 	if hw != nil {
@@ -371,24 +371,4 @@ func (s *Server) detectHardware() *hardware.Inventory {
 		)
 	}
 	return inv
-}
-
-// flagsMapToSlice converts a map of flag names to values into a string slice.
-// e.g. {"ctx-size": 131072, "flash-attn": "on"} → ["--ctx-size", "131072", "--flash-attn", "on"]
-func flagsMapToSlice(flags map[string]interface{}) []string {
-	var result []string
-	for k, v := range flags {
-		flag := fmt.Sprintf("--%s", k)
-		switch val := v.(type) {
-		case bool:
-			if val {
-				result = append(result, flag)
-			}
-		case string:
-			result = append(result, flag, val)
-		default:
-			result = append(result, flag, fmt.Sprintf("%v", val))
-		}
-	}
-	return result
 }

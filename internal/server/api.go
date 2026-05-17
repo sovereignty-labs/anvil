@@ -13,6 +13,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/hirdforge/nollama/internal/config"
 	"github.com/hirdforge/nollama/internal/hardware"
 	"github.com/hirdforge/nollama/internal/model"
 	"github.com/hirdforge/nollama/internal/process"
@@ -353,7 +354,7 @@ func (s *Server) handleLoad(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	passthrough := flagsMapToSlice(req.Flags)
+	passthrough := config.FlagsMapToSlice(req.Flags)
 	procInfo, err := s.procMgr.Start(result, filepath.Base(req.Model), passthrough)
 	if err != nil {
 		writeAPIError(w, http.StatusInternalServerError, err.Error())
