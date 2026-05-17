@@ -1,51 +1,45 @@
-name: Build and Test
+name: Build, Test, Push
 
 on:
   push:
     branches: [main]
-  pull_request:
-    branches: [main]
-
-env:
-  REGISTRY_PASSWORD: ${{ secrets.REGISTRY_PASSWORD }}
 
 jobs:
   build:
-    runs-on: ubuntu-latest
-
+    runs-on: linux-amd64
+    services:
+      dind:
+        image: docker:dind
+        options: --privileged
     steps:
-      - name: Install Go
-        run: |
-          apk add --no-cache go git
-          go version
-
       - name: Clone repository
         run: |
-          rm -rf /src && git clone http://kit:${REGISTRY_PASSWORD}@gitea-http.gitea.svc.cluster.local:3000/kit/nollama.git /src
+          apk add --no-cache git docker-cli
+          git clone http://gitea-http.gitea.svc.cluster.local:3000/kit/nollama.git /src
+          cd /src && git checkout ${GITHUB_SHA}
 
-      - name: Download dependencies
+      - name: Build and test (Go)
         run: |
+          apk add --no-cache go
           cd /src
           go mod download
-
-      - name: Run tests
-        run: |
-          cd /src
           go test ./...
 
-      - name: Build binary
+      - name: Build Docker image
         run: |
+          export DOCKER_HOST=tcp://localhost:2375
           cd /src
           SHA_SHORT=$(git rev-parse --short HEAD)
-          CGO_ENABLED=0 GOOS=linux go build \
-            -trimpath \
-            -ldflags "-s -w \
-              -X github.com/hirdforge/nollama/internal/version.Version=dev \
-              -X github.com/hirdforge/nollama/internal/version.Commit=${SHA_SHORT} \
-              -X github.com/hirdforge/nollama/internal/version.Date=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-            -o /src/nollama ./cmd/nollama
+          docker build \
+            --build-arg VERSION=dev \
+            --build-arg COMMIT=${SHA_SHORT} \
+            --build-arg DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ) \
+            -t git.hirdforge.com/kit/nollama/nollama:latest \
+            -t git.hirdforge.com/kit/nollama/nollama:${SHA_SHORT} .
 
-      - name: Verify binary
+      - name: Push to registry
         run: |
-          /src/nollama --version
-          /src/nollama --help
+          export DOCKER_HOST=tcp://localhost:2375
+          echo "${{ secrets.REGISTRY_PASSWORD }}" | docker login git.hirdforge.com --username kit --password-stdin
+          docker push git.hirdforge.com/kit/nollama/nollama:latest
+          docker push git.hirdforge.com/kit/nollama/nollama:${SHA_SHORT}
