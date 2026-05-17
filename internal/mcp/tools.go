@@ -203,35 +203,37 @@ func (r *Runner) toolModels(ctx context.Context, req mcpkit.CallToolRequest) (re
 		return mcpkit.NewToolResultText(renderModelRows(rows)), nil
 	}
 
-	client, err := r.clientForNode("")
+	dir, err := resolveLocalModelDir(r.cfg)
 	if err != nil {
 		return mcpkit.NewToolResultError(err.Error()), nil
 	}
-	resp, err := client.Models()
+	models, err := model.ScanDir(dir)
 	if err != nil {
 		return mcpkit.NewToolResultError(err.Error()), nil
 	}
-	if len(resp.Models) == 0 {
-		return mcpkit.NewToolResultText(fmt.Sprintf("No GGUF models found in %s", r.cfg.ModelDir)), nil
+	if len(models) == 0 {
+		return mcpkit.NewToolResultText(fmt.Sprintf("No GGUF models found in %s", dir)), nil
 	}
 
-	rows := make([]modelDisplay, 0, len(resp.Models))
-	for _, m := range resp.Models {
+	rows := make([]modelDisplay, 0, len(models))
+	for _, m := range models {
 		row := modelDisplay{
-			Name:    strings.TrimSuffix(m.Name, ".gguf"),
-			Size:    m.SizeHuman,
+			Name:    strings.TrimSuffix(m.Filename, ".gguf"),
+			Size:    m.SizeHuman(),
 			Arch:    "-",
 			Quant:   "-",
 			Context: "-",
 		}
-		if m.Arch != "" {
-			row.Arch = m.Arch
-		}
-		if m.Quant != "" {
-			row.Quant = m.Quant
-		}
-		if m.ContextLength > 0 {
-			row.Context = formatContextLength(m.ContextLength)
+		if m.Meta != nil {
+			if m.Meta.Architecture != "" {
+				row.Arch = m.Meta.Architecture
+			}
+			if q := m.Meta.QuantDisplayName(m.Filename); q != "" {
+				row.Quant = q
+			}
+			if m.Meta.ContextLength > 0 {
+				row.Context = formatContextLength(m.Meta.ContextLength)
+			}
 		}
 		rows = append(rows, row)
 	}
