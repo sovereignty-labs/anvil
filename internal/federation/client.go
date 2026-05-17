@@ -70,6 +70,12 @@ type LoadResult struct {
 // LoadResponse is the public name used by callers.
 type LoadResponse = LoadResult
 
+// PullResponse mirrors the server upload response for remote pulls.
+type PullResponse struct {
+	Filename string `json:"filename"`
+	Size     int64  `json:"size"`
+}
+
 // UnloadRequest mirrors internal/server.unloadRequest.
 type UnloadRequest struct {
 	Model string `json:"model"`
@@ -139,6 +145,53 @@ func (c *Client) Models() (*ModelsResponse, error) {
 		return nil, err
 	}
 	return &resp, nil
+}
+
+// Pull triggers a HuggingFace pull on the remote node.
+func (c *Client) Pull(spec string) (*PullResponse, error) {
+	endpoint, err := c.endpoint("/api/pull")
+	if err != nil {
+		return nil, err
+	}
+
+	reqBody := struct {
+		Spec string `json:"spec"`
+	}{Spec: spec}
+
+	payload, err := json.Marshal(reqBody)
+	if err != nil {
+		return nil, fmt.Errorf("encoding request for /api/pull: %w", err)
+	}
+
+	req, err := http.NewRequest(http.MethodPost, endpoint, bytes.NewReader(payload))
+	if err != nil {
+		return nil, fmt.Errorf("building request for /api/pull: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	// Pulls can take minutes for large models, so use a dedicated client with no timeout.
+	client := &http.Client{Timeout: 0}
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	data, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("reading response from /api/pull: %w", err)
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, requestError("/api/pull", resp.StatusCode, data)
+	}
+
+	var out PullResponse
+	if err := json.Unmarshal(data, &out); err != nil {
+		return nil, fmt.Errorf("decoding response from /api/pull: %w", err)
+	}
+	return &out, nil
 }
 
 // CheckModelExists checks whether the remote node already has a model file.

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/hirdforge/nollama/internal/config"
@@ -27,8 +28,24 @@ func init() {
 	pullCmd.Flags().StringVar(&pullModelDir, "model-dir", "", "Directory to save models")
 }
 
-func runPull(_ *cobra.Command, args []string) error {
+func runPull(cmd *cobra.Command, args []string) error {
 	spec := args[0]
+
+	if client, err := resolveNodeClient(cmd); err != nil {
+		return fatalPull(err)
+	} else if client != nil {
+		node, _ := cmd.Flags().GetString("node")
+		node = strings.TrimSpace(node)
+
+		resp, err := client.Pull(spec)
+		if err != nil {
+			return fatalPull(err)
+		}
+
+		fmt.Printf("Pulled %s on %s (%s)\n", resp.Filename, node, humanSize(resp.Size))
+		return nil
+	}
+
 	parsed, err := pull.ParseSpec(spec)
 	if err != nil {
 		return fatalPull(err)
