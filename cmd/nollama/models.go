@@ -51,22 +51,9 @@ func runModels(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	// Determine model directory
-	dir := modelsDir
-	if dir == "" {
-		dir = os.Getenv("NOLLAMA_MODEL_DIR")
-	}
-	if dir == "" {
-		// Try config file
-		cfgPath := config.FindConfig()
-		if cfgPath != "" {
-			if cfg, err := config.Load(cfgPath); err == nil && cfg.ModelDir != "" {
-				dir = cfg.ModelDir
-			}
-		}
-	}
-	if dir == "" {
-		dir = config.DefaultConfig().ModelDir
+	dir, err := resolveLocalModelDir()
+	if err != nil {
+		return err
 	}
 
 	// Check directory exists
@@ -90,6 +77,28 @@ func runModels(cmd *cobra.Command, args []string) error {
 	fmt.Printf("\n%d models, %s (%s)\n", len(models), totalSize(models), dir)
 
 	return nil
+}
+
+func resolveLocalModelDir() (string, error) {
+	if modelsDir != "" {
+		return modelsDir, nil
+	}
+	if dir := os.Getenv("NOLLAMA_MODEL_DIR"); dir != "" {
+		return dir, nil
+	}
+
+	cfgPath := config.FindConfig()
+	if cfgPath != "" {
+		cfg, err := config.Load(cfgPath)
+		if err != nil {
+			return "", err
+		}
+		if cfg.ModelDir != "" {
+			return cfg.ModelDir, nil
+		}
+	}
+
+	return config.DefaultConfig().ModelDir, nil
 }
 
 type modelDisplay struct {

@@ -1,6 +1,7 @@
 package federation
 
 import (
+	"bytes"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -178,5 +179,72 @@ func TestClientHealthDown(t *testing.T) {
 	client := NewClient(srv.URL)
 	if err := client.Health(); err == nil {
 		t.Fatal("expected health error")
+	}
+}
+
+func TestClientCheckModelExists(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != "/api/models" {
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+		_ = json.NewEncoder(w).Encode(ModelsResponse{
+			Models: []ModelInfo{
+				{Name: "gpu-host.gguf", SizeBytes: 42},
+			},
+		})
+	}))
+	defer srv.Close()
+
+	client := NewClient(srv.URL)
+	exists, size, err := client.CheckModelExists("gpu-host.gguf")
+	if err != nil {
+		t.Fatalf("CheckModelExists failed: %v", err)
+	}
+	if !exists || size != 42 {
+		t.Fatalf("unexpected result: exists=%v size=%d", exists, size)
+	}
+}
+
+func TestClientUploadModel(t *testing.T) {
+	var gotFilename string
+	var gotSHA string
+	var gotLength int64
+	var gotBody []byte
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/api/upload" {
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+		gotFilename = r.Header.Get("X-Filename")
+		gotSHA = r.Header.Get("X-SHA256")
+		gotLength = r.ContentLength
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Fatal(err)
+		}
+		gotBody = body
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"filename": gotFilename,
+			"size":     len(body),
+		})
+	}))
+	defer srv.Close()
+
+	client := NewClient(srv.URL)
+	if err := client.UploadModel("gpu-host.gguf", bytes.NewBufferString("abc"), 3, "deadbeef"); err != nil {
+		t.Fatalf("UploadModel failed: %v", err)
+	}
+
+	if gotFilename != "gpu-host.gguf" {
+		t.Fatalf("X-Filename = %q, want gpu-host.gguf", gotFilename)
+	}
+	if gotSHA != "deadbeef" {
+		t.Fatalf("X-SHA256 = %q, want deadbeef", gotSHA)
+	}
+	if gotLength != 3 {
+		t.Fatalf("ContentLength = %d, want 3", gotLength)
+	}
+	if string(gotBody) != "abc" {
+		t.Fatalf("body = %q, want abc", gotBody)
 	}
 }

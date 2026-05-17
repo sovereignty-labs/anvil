@@ -1,8 +1,11 @@
 package server
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"os"
@@ -54,6 +57,109 @@ type modelSummary struct {
 
 type modelsResponse struct {
 	Models []modelSummary `json:"models"`
+}
+
+type uploadConflictResponse struct {
+	Error    string `json:"error"`
+	Filename string `json:"filename"`
+}
+
+type uploadResponse struct {
+	Filename string `json:"filename"`
+	Size     int64  `json:"size"`
+}
+
+func (s *Server) handleUpload(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeMethodNotAllowed(w, http.MethodPost)
+		return
+	}
+
+	filename := strings.TrimSpace(r.Header.Get("X-Filename"))
+	if filename == "" {
+		writeAPIError(w, http.StatusBadRequest, "X-Filename is required")
+		return
+	}
+	if filepath.Base(filename) != filename {
+		writeAPIError(w, http.StatusBadRequest, "invalid filename")
+		return
+	}
+
+	sizeHeader := strings.TrimSpace(r.Header.Get("X-Content-Length"))
+	if sizeHeader == "" {
+		writeAPIError(w, http.StatusBadRequest, "X-Content-Length is required")
+		return
+	}
+	expectedSize, err := strconv.ParseInt(sizeHeader, 10, 64)
+	if err != nil || expectedSize < 0 {
+		writeAPIError(w, http.StatusBadRequest, "invalid X-Content-Length")
+		return
+	}
+
+	finalPath := s.cfg.ModelPath(filename)
+	if info, err := os.Stat(finalPath); err == nil && info.Size() == expectedSize {
+		writeJSON(w, http.StatusConflict, uploadConflictResponse{
+			Error:    "already exists",
+			Filename: filename,
+		})
+		return
+	} else if err != nil && !os.IsNotExist(err) {
+		writeAPIError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	if err := os.MkdirAll(filepath.Dir(finalPath), 0o755); err != nil {
+		writeAPIError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	partialPath := finalPath + ".partial"
+	partial, err := os.Create(partialPath)
+	if err != nil {
+		writeAPIError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	cleanup := true
+	defer func() {
+		_ = partial.Close()
+		if cleanup {
+			_ = os.Remove(partialPath)
+		}
+	}()
+
+	hasher := sha256.New()
+	written, err := io.Copy(partial, io.TeeReader(r.Body, hasher))
+	if err != nil {
+		writeAPIError(w, http.StatusBadRequest, fmt.Sprintf("upload failed: %v", err))
+		return
+	}
+	if written != expectedSize {
+		writeAPIError(w, http.StatusBadRequest, "content length mismatch")
+		return
+	}
+
+	if shaHeader := strings.TrimSpace(r.Header.Get("X-SHA256")); shaHeader != "" {
+		actualSHA := hex.EncodeToString(hasher.Sum(nil))
+		if !strings.EqualFold(actualSHA, shaHeader) {
+			writeAPIError(w, http.StatusBadRequest, "sha256 mismatch")
+			return
+		}
+	}
+
+	if err := partial.Close(); err != nil {
+		writeAPIError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if err := os.Rename(partialPath, finalPath); err != nil {
+		writeAPIError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	cleanup = false
+	writeJSON(w, http.StatusOK, uploadResponse{
+		Filename: filename,
+		Size:     written,
+	})
 }
 
 func (s *Server) handleLoad(w http.ResponseWriter, r *http.Request) {

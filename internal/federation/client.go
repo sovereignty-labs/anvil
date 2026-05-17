@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"path/filepath"
 	"strings"
 	"time"
 )
@@ -138,6 +139,62 @@ func (c *Client) Models() (*ModelsResponse, error) {
 		return nil, err
 	}
 	return &resp, nil
+}
+
+// CheckModelExists checks whether the remote node already has a model file.
+func (c *Client) CheckModelExists(filename string) (bool, int64, error) {
+	models, err := c.Models()
+	if err != nil {
+		return false, 0, err
+	}
+
+	name := filepath.Base(filename)
+	for _, model := range models.Models {
+		if model.Name == name {
+			return true, model.SizeBytes, nil
+		}
+	}
+
+	return false, 0, nil
+}
+
+// UploadModel streams a GGUF file to /api/upload.
+func (c *Client) UploadModel(filename string, reader io.Reader, size int64, sha256 string) error {
+	endpoint, err := c.endpoint("/api/upload")
+	if err != nil {
+		return err
+	}
+
+	req, err := http.NewRequest(http.MethodPost, endpoint, reader)
+	if err != nil {
+		return fmt.Errorf("building upload request for %s: %w", filename, err)
+	}
+	req.Header.Set("X-Filename", filepath.Base(filename))
+	req.Header.Set("X-Content-Length", fmt.Sprintf("%d", size))
+	if sha256 != "" {
+		req.Header.Set("X-SHA256", sha256)
+	}
+	if size >= 0 {
+		req.ContentLength = size
+	}
+
+	client := c.HTTPClient
+	if client == nil {
+		client = &http.Client{Timeout: 30 * time.Second}
+	}
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		data, _ := io.ReadAll(resp.Body)
+		return requestError("/api/upload", resp.StatusCode, data)
+	}
+
+	return nil
 }
 
 // Health fetches /health and requires HTTP 200.

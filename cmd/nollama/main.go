@@ -1,12 +1,15 @@
 package main
 
 import (
+	"crypto/sha256"
 	"fmt"
+	"io"
 	"os"
 	"os/signal"
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync/atomic"
 	"syscall"
 	"text/tabwriter"
 	"time"
@@ -240,9 +243,7 @@ var cpCmd = &cobra.Command{
 	Use:   "cp <model.gguf> --to <node>",
 	Short: "Copy a model to another node",
 	Args:  cobra.ExactArgs(1),
-	RunE: func(cmd *cobra.Command, args []string) error {
-		return fmt.Errorf("not implemented yet — Phase 2")
-	},
+	RunE:  runCP,
 }
 
 // runLoad handles the load command — parses GGUF, detects hardware, computes flags.
@@ -524,6 +525,76 @@ func runRemotePing(_ *cobra.Command, _ []string) error {
 	return w.Flush()
 }
 
+func runCP(cmd *cobra.Command, args []string) error {
+	target, err := cmd.Flags().GetString("to")
+	if err != nil {
+		return err
+	}
+	target = strings.TrimSpace(target)
+	if target == "" {
+		return fmt.Errorf("--to is required")
+	}
+
+	remote, err := resolveRemoteClientByName(target)
+	if err != nil {
+		return err
+	}
+
+	dir, err := resolveLocalModelDir()
+	if err != nil {
+		return err
+	}
+
+	models, err := model.ScanDir(dir)
+	if err != nil {
+		return fmt.Errorf("scanning models: %w", err)
+	}
+	if len(models) == 0 {
+		return fmt.Errorf("no GGUF models found in %s", dir)
+	}
+
+	modelByName := make(map[string]model.ModelInfo, len(models))
+	names := make([]string, 0, len(models))
+	for _, m := range models {
+		modelByName[m.Filename] = m
+		names = append(names, m.Filename)
+	}
+
+	match := model.FuzzyMatchModel(args[0], names)
+	if match == "" {
+		return fmt.Errorf("no local model matches %q in %s", args[0], dir)
+	}
+
+	info := modelByName[match]
+	exists, remoteSize, err := remote.CheckModelExists(info.Filename)
+	if err != nil {
+		return err
+	}
+	if exists && remoteSize == info.SizeBytes {
+		fmt.Printf("Skipped %s on %s (%s already exists)\n", info.Filename, target, humanSize(info.SizeBytes))
+		return nil
+	}
+
+	file, err := os.Open(info.Path)
+	if err != nil {
+		return fmt.Errorf("opening %s: %w", info.Path, err)
+	}
+	defer file.Close()
+
+	hasher := sha256.New()
+	counting := &progressReader{r: io.TeeReader(file, hasher)}
+	done := make(chan struct{})
+	defer close(done)
+	go reportCopyProgress(done, info.Filename, info.SizeBytes, counting)
+
+	if err := remote.UploadModel(info.Filename, counting, info.SizeBytes, ""); err != nil {
+		return err
+	}
+
+	fmt.Printf("Copied %s to %s (%s)\n", info.Filename, target, humanSize(info.SizeBytes))
+	return nil
+}
+
 func loadFederatedRemotes() (*federation.RemoteRegistry, map[string]config.Remote, error) {
 	registry, err := federation.LoadRegistry(federation.DefaultRegistryPath())
 	if err != nil {
@@ -584,18 +655,74 @@ func resolveNodeClient(cmd *cobra.Command) (*federation.Client, error) {
 		return nil, nil
 	}
 
+	return resolveRemoteClientByName(node)
+}
+
+func resolveRemoteClientByName(name string) (*federation.Client, error) {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return nil, fmt.Errorf("remote node name is required")
+	}
+
 	registry, cfgRemotes, err := loadFederatedRemotes()
 	if err != nil {
 		return nil, err
 	}
 
 	merged := federation.MergeRemotes(registry, cfgRemotes)
-	baseURL, ok := merged[node]
+	baseURL, ok := merged[name]
 	if !ok {
-		return nil, fmt.Errorf("remote node %q not found in registry", node)
+		return nil, fmt.Errorf("remote node %q not found in registry", name)
 	}
 
 	return federation.NewClient(baseURL), nil
+}
+
+type progressReader struct {
+	r io.Reader
+	n int64
+}
+
+func (p *progressReader) Read(buf []byte) (int, error) {
+	n, err := p.r.Read(buf)
+	if n > 0 {
+		atomic.AddInt64(&p.n, int64(n))
+	}
+	return n, err
+}
+
+func (p *progressReader) Count() int64 {
+	return atomic.LoadInt64(&p.n)
+}
+
+func reportCopyProgress(done <-chan struct{}, filename string, total int64, reader *progressReader) {
+	ticker := time.NewTicker(2 * time.Second)
+	defer ticker.Stop()
+
+	last := int64(-1)
+	printProgress := func() {
+		transferred := reader.Count()
+		if transferred == last {
+			return
+		}
+		last = transferred
+		percent := 100.0
+		if total > 0 {
+			percent = (float64(transferred) / float64(total)) * 100
+		}
+		fmt.Fprintf(os.Stderr, "\r%s: %s/%s (%.0f%%)", filename, humanSize(transferred), humanSize(total), percent)
+	}
+
+	for {
+		select {
+		case <-ticker.C:
+			printProgress()
+		case <-done:
+			printProgress()
+			fmt.Fprintln(os.Stderr)
+			return
+		}
+	}
 }
 
 func init() {
