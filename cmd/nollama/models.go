@@ -123,8 +123,8 @@ func renderLocalModels(models []model.ModelInfo) {
 			if m.Meta.Architecture != "" {
 				rows[len(rows)-1].Arch = m.Meta.Architecture
 			}
-			if m.Meta.QuantName != "" {
-				rows[len(rows)-1].Quant = m.Meta.QuantName
+			if q := m.Meta.QuantDisplayName(m.Filename); q != "" {
+				rows[len(rows)-1].Quant = q
 			}
 			if m.Meta.ContextLength > 0 {
 				rows[len(rows)-1].Context = formatContext(m.Meta.ContextLength)

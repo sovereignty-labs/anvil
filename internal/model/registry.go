@@ -66,6 +66,7 @@ func ScanDir(dir string) ([]ModelInfo, error) {
 
 		// Try to parse GGUF metadata. Non-fatal if it fails.
 		if meta, err := ParseGGUF(path); err == nil {
+			meta.QuantName = meta.QuantDisplayName(entry.Name())
 			mi.Meta = meta
 		}
 

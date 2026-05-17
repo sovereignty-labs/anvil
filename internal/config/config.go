@@ -46,6 +46,9 @@ type Config struct {
 
 	// MCP configures the MCP server.
 	MCP *MCPConfig `yaml:"mcp"`
+
+	// RuntimesDir overrides the llama-server runtime directory.
+	RuntimesDir string `yaml:"runtimes_dir"`
 }
 
 // Remote is a federated nollama node.
