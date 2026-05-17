@@ -15,8 +15,7 @@ jobs:
       - name: Clone repository
         run: |
           apk add --no-cache git docker-cli
-          git clone http://gitea-http.gitea.svc.cluster.local:3000/kit/nollama.git /src
-          cd /src && git checkout ${GITHUB_SHA}
+          git clone --depth 1 http://gitea-http.gitea.svc.cluster.local:3000/kit/nollama.git /src
 
       - name: Build and test (Go)
         run: |
