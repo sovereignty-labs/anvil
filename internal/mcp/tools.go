@@ -659,10 +659,16 @@ func resolveLocalModelDir(cfg *config.Config) (string, error) {
 	return config.DefaultConfig().ModelDir, nil
 }
 
+var mcpDebug = os.Getenv("NOLLAMA_MCP_DEBUG") != ""
+
 func logToolStart(name string, args map[string]any) {
-	fmt.Fprintf(os.Stderr, "mcp tool start: %s args=%v\n", name, args)
+	if mcpDebug {
+		fmt.Fprintf(os.Stderr, "mcp tool start: %s args=%v\n", name, args)
+	}
 }
 
 func logToolEnd(name string) {
-	fmt.Fprintf(os.Stderr, "mcp tool end: %s\n", name)
+	if mcpDebug {
+		fmt.Fprintf(os.Stderr, "mcp tool end: %s\n", name)
+	}
 }

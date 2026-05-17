@@ -197,6 +197,11 @@ func (s *Server) reloadConfig() error {
 		s.proxy.SetAliases(newCfg.Aliases)
 	}
 
+	// Update MCP runner config
+	if s.mcpRunner != nil {
+		s.mcpRunner.UpdateConfig(newCfg)
+	}
+
 	// Reconcile autoloaded models
 	hw := s.detectHardware()
 	s.reconcileModels(hw)
