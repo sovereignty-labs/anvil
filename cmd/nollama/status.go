@@ -1,96 +1,240 @@
 package main
 
 import (
-	"context"
-	"encoding/json"
-	"errors"
 	"fmt"
 	"net"
-	"net/http"
 	"net/url"
 	"os"
+	"sort"
 	"strings"
+	"sync"
 	"text/tabwriter"
 	"time"
 
 	"github.com/hirdforge/nollama/internal/config"
-	"github.com/hirdforge/nollama/internal/hardware"
-	"github.com/hirdforge/nollama/internal/process"
+	"github.com/hirdforge/nollama/internal/federation"
 	"github.com/spf13/cobra"
 )
 
-type daemonStatusResponse struct {
-	Models []daemonStatusModel `json:"models"`
-	Node   daemonStatusNode    `json:"node"`
-}
-
-type daemonStatusModel struct {
-	Name          string `json:"name"`
-	Port          int    `json:"port"`
-	GPU           string `json:"gpu"`
-	PID           int    `json:"pid"`
-	UptimeSeconds int64  `json:"uptime_seconds"`
-}
-
-type daemonStatusNode struct {
-	GPUs       []daemonStatusGPU `json:"gpus"`
-	RAMTotalMB uint64            `json:"ram_total_mb"`
-	RAMFreeMB  uint64            `json:"ram_free_mb"`
-}
-
-type daemonStatusGPU struct {
-	Index       int    `json:"index"`
-	Name        string `json:"name"`
-	VRAMTotalMB uint64 `json:"vram_total_mb"`
-	VRAMFreeMB  uint64 `json:"vram_free_mb"`
-}
-
-type statusReport struct {
-	Models []statusModel
-	Node   statusNode
-}
-
-type statusModel struct {
-	Name   string
-	Port   int
+type statusRow struct {
+	Node   string
 	GPU    string
-	PID    int
-	Uptime time.Duration
+	Model  string
+	VRAM   string
+	Port   string
+	PID    string
+	Uptime string
 }
 
-type statusNode struct {
-	GPUs       []statusGPU
-	RAMTotalMB uint64
-	RAMFreeMB  uint64
+type nodeStatusResult struct {
+	Name   string
+	Status *federation.StatusResponse
+	Err    error
 }
 
-type statusGPU struct {
-	Index       int
-	Name        string
-	VRAMTotalMB uint64
-	VRAMFreeMB  uint64
-}
-
-func runStatus(_ *cobra.Command, _ []string) error {
-	daemonAddr := resolveStatusDaemonAddr()
-
-	report, daemonUnavailable, err := fetchDaemonStatus(daemonAddr)
-	if err != nil && !daemonUnavailable {
+func runStatus(cmd *cobra.Command, _ []string) error {
+	if client, err := resolveNodeClient(cmd); err != nil {
 		return err
-	}
-	if daemonUnavailable {
-		local := buildLocalStatusReport()
-		if len(local.Models) == 0 {
-			fmt.Printf("No nollama daemon detected on %s\n", daemonAddr)
-			fmt.Println("No loaded models. Run `nollama serve --config` or `nollama load <model.gguf>`")
-			return nil
+	} else if client != nil {
+		nodeName, _ := cmd.Flags().GetString("node")
+		resp, err := statusForClient(client, 5*time.Second)
+		if err != nil {
+			return err
 		}
-		renderStatusReport(local)
+		renderSingleNodeStatus(nodeName, resp)
 		return nil
 	}
 
-	renderStatusReport(*report)
+	registry, cfgRemotes, err := loadFederatedRemotes()
+	if err != nil {
+		return err
+	}
+
+	localURL := resolveStatusDaemonAddr()
+	mergedRemotes := federation.MergeRemotes(registry, cfgRemotes)
+	targets := []nodeTarget{{Name: "local", URL: localURL}}
+	remoteNames := sortedRemoteNames(mergedRemotes)
+	for _, name := range remoteNames {
+		targets = append(targets, nodeTarget{Name: name, URL: mergedRemotes[name]})
+	}
+
+	results := queryNodeStatuses(targets, 5*time.Second)
+
+	if len(remoteNames) == 0 && len(results) == 1 && results[0].Err != nil {
+		fmt.Println("No daemon running and no remotes configured.")
+		return nil
+	}
+
+	renderFleetStatus(results)
 	return nil
+}
+
+type nodeTarget struct {
+	Name string
+	URL  string
+}
+
+func queryNodeStatuses(targets []nodeTarget, timeout time.Duration) []nodeStatusResult {
+	results := make(chan nodeStatusResult, len(targets))
+	var wg sync.WaitGroup
+
+	for _, target := range targets {
+		target := target
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+
+			client := federation.NewClient(target.URL)
+			client.HTTPClient.Timeout = timeout
+
+			status, err := client.Status()
+			results <- nodeStatusResult{Name: target.Name, Status: status, Err: err}
+		}()
+	}
+
+	wg.Wait()
+	close(results)
+
+	out := make([]nodeStatusResult, 0, len(targets))
+	for result := range results {
+		out = append(out, result)
+	}
+
+	sort.SliceStable(out, func(i, j int) bool {
+		if out[i].Name == out[j].Name {
+			return out[i].Err == nil && out[j].Err != nil
+		}
+		return out[i].Name < out[j].Name
+	})
+
+	return out
+}
+
+func statusForClient(client *federation.Client, timeout time.Duration) (*federation.StatusResponse, error) {
+	client.HTTPClient.Timeout = timeout
+	return client.Status()
+}
+
+func renderSingleNodeStatus(nodeName string, resp *federation.StatusResponse) {
+	rows := buildStatusRows(nodeName, resp)
+	renderStatusRows(rows)
+}
+
+func renderFleetStatus(results []nodeStatusResult) {
+	rows := make([]statusRow, 0)
+	online := 0
+
+	for _, result := range results {
+		if result.Err != nil || result.Status == nil {
+			rows = append(rows, statusRow{
+				Node:   result.Name,
+				GPU:    "offline",
+				Model:  "—",
+				VRAM:   "—",
+				Port:   "—",
+				PID:    "—",
+				Uptime: "—",
+			})
+			continue
+		}
+
+		online++
+		rows = append(rows, buildStatusRows(result.Name, result.Status)...)
+	}
+
+	if len(rows) == 0 {
+		fmt.Println("No loaded models.")
+		return
+	}
+
+	renderStatusRows(rows)
+	fmt.Println()
+	fmt.Printf("NODES: %d online\n", online)
+}
+
+func renderStatusRows(rows []statusRow) {
+	if len(rows) == 0 {
+		fmt.Println("No loaded models.")
+		return
+	}
+
+	w := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
+	fmt.Fprintln(w, "NODE\tGPU\tMODEL\tVRAM\tPORT\tPID\tUPTIME")
+	for _, row := range rows {
+		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
+			row.Node, row.GPU, row.Model, row.VRAM, row.Port, row.PID, row.Uptime)
+	}
+	_ = w.Flush()
+}
+
+func buildStatusRows(nodeName string, resp *federation.StatusResponse) []statusRow {
+	rows := make([]statusRow, 0, len(resp.Models))
+	for _, model := range resp.Models {
+		rows = append(rows, statusRow{
+			Node:   nodeName,
+			GPU:    modelGPUName(resp.Node, model.GPU),
+			Model:  model.Name,
+			VRAM:   modelVRAM(resp.Node, model.GPU),
+			Port:   fmt.Sprintf("%d", model.Port),
+			PID:    fmt.Sprintf("%d", model.PID),
+			Uptime: processFormatDuration(time.Duration(model.UptimeSeconds) * time.Second),
+		})
+	}
+
+	return rows
+}
+
+func modelGPUName(node federation.StatusNode, gpu string) string {
+	if gpu == "" || gpu == "cpu" {
+		return "cpu"
+	}
+	if idx, ok := parseCUDAIndex(gpu); ok {
+		for _, g := range node.GPUs {
+			if g.Index == idx && g.Name != "" {
+				return g.Name
+			}
+		}
+	}
+	return gpu
+}
+
+func modelVRAM(node federation.StatusNode, gpu string) string {
+	if gpu == "" || gpu == "cpu" {
+		return "—"
+	}
+	if idx, ok := parseCUDAIndex(gpu); ok {
+		for _, g := range node.GPUs {
+			if g.Index == idx {
+				return fmt.Sprintf("%.1f/%.1fGB", mbToGB(g.VRAMFreeMB), mbToGB(g.VRAMTotalMB))
+			}
+		}
+	}
+	return "—"
+}
+
+func mbToGB(mb uint64) float64 {
+	return float64(mb) / 1024
+}
+
+func processFormatDuration(d time.Duration) string {
+	if d < 0 {
+		d = 0
+	}
+	days := d / (24 * time.Hour)
+	d -= days * 24 * time.Hour
+	hours := d / time.Hour
+	if days > 0 {
+		return fmt.Sprintf("%dd %dh", days, hours)
+	}
+	if hours > 0 {
+		return fmt.Sprintf("%dh %dm", hours, (d%time.Hour)/time.Minute)
+	}
+	minutes := d / time.Minute
+	if minutes > 0 {
+		return fmt.Sprintf("%dm", minutes)
+	}
+	seconds := d / time.Second
+	return fmt.Sprintf("%ds", seconds)
 }
 
 func resolveStatusDaemonAddr() string {
@@ -125,183 +269,6 @@ func normalizeDialAddress(bind string) string {
 		host = "localhost"
 	}
 	return net.JoinHostPort(host, port)
-}
-
-func fetchDaemonStatus(addr string) (*statusReport, bool, error) {
-	client := &http.Client{Timeout: 2 * time.Second}
-	resp, err := client.Get(fmt.Sprintf("http://%s/api/status", addr))
-	if err != nil {
-		if isDaemonUnavailable(err) {
-			return nil, true, err
-		}
-		return nil, false, err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, false, fmt.Errorf("daemon at %s returned %s", addr, resp.Status)
-	}
-
-	var d daemonStatusResponse
-	if err := json.NewDecoder(resp.Body).Decode(&d); err != nil {
-		return nil, false, fmt.Errorf("decoding daemon status: %w", err)
-	}
-
-	return convertDaemonStatus(d), false, nil
-}
-
-func isDaemonUnavailable(err error) bool {
-	var netErr net.Error
-	if errors.As(err, &netErr) {
-		return true
-	}
-	return errors.Is(err, context.DeadlineExceeded)
-}
-
-func convertDaemonStatus(d daemonStatusResponse) *statusReport {
-	report := &statusReport{
-		Models: make([]statusModel, 0, len(d.Models)),
-		Node: statusNode{
-			GPUs:       make([]statusGPU, 0, len(d.Node.GPUs)),
-			RAMTotalMB: d.Node.RAMTotalMB,
-			RAMFreeMB:  d.Node.RAMFreeMB,
-		},
-	}
-
-	for _, gpu := range d.Node.GPUs {
-		report.Node.GPUs = append(report.Node.GPUs, statusGPU{
-			Index:       gpu.Index,
-			Name:        gpu.Name,
-			VRAMTotalMB: gpu.VRAMTotalMB,
-			VRAMFreeMB:  gpu.VRAMFreeMB,
-		})
-	}
-	for _, model := range d.Models {
-		report.Models = append(report.Models, statusModel{
-			Name:   model.Name,
-			Port:   model.Port,
-			GPU:    model.GPU,
-			PID:    model.PID,
-			Uptime: time.Duration(model.UptimeSeconds) * time.Second,
-		})
-	}
-
-	return report
-}
-
-func buildLocalStatusReport() statusReport {
-	report := statusReport{
-		Models: make([]statusModel, 0),
-	}
-
-	hw, err := hardware.Detect()
-	if err == nil && hw != nil {
-		report.Node = statusNode{
-			GPUs:       make([]statusGPU, 0, len(hw.GPUs)),
-			RAMTotalMB: hw.CPU.RAMTotalMB,
-			RAMFreeMB:  hw.CPU.RAMFreeMB,
-		}
-		for _, gpu := range hw.GPUs {
-			report.Node.GPUs = append(report.Node.GPUs, statusGPU{
-				Index:       gpu.Index,
-				Name:        gpu.DisplayName(),
-				VRAMTotalMB: gpu.VRAMTotal,
-				VRAMFreeMB:  gpu.VRAMFree,
-			})
-		}
-	}
-
-	procs := process.GetManager().List()
-	for _, proc := range procs {
-		report.Models = append(report.Models, statusModel{
-			Name:   proc.ModelName,
-			Port:   proc.Port,
-			GPU:    proc.GPUIndex,
-			PID:    proc.PID,
-			Uptime: proc.Uptime(),
-		})
-	}
-
-	return report
-}
-
-func renderStatusReport(report statusReport) {
-	rows := buildStatusRows(report)
-	if len(rows) == 0 {
-		fmt.Println("No loaded models.")
-		fmt.Println()
-		fmt.Println("MODELS: 0 loaded")
-		return
-	}
-
-	w := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
-	fmt.Fprintln(w, "NODE\tGPU\tMODEL\tPORT\tPID\tUPTIME")
-	for _, row := range rows {
-		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\n",
-			row.Node, row.GPU, row.Model, row.Port, row.PID, row.Uptime)
-	}
-	w.Flush()
-
-	fmt.Println()
-	fmt.Printf("MODELS: %d loaded\n", len(report.Models))
-}
-
-type statusRow struct {
-	Node   string
-	GPU    string
-	Model  string
-	Port   string
-	PID    string
-	Uptime string
-}
-
-func buildStatusRows(report statusReport) []statusRow {
-	rows := make([]statusRow, 0, len(report.Models)+len(report.Node.GPUs))
-	usedGPU := make(map[int]bool)
-	gpuNames := make(map[int]string, len(report.Node.GPUs))
-	for _, gpu := range report.Node.GPUs {
-		gpuNames[gpu.Index] = gpu.Name
-	}
-
-	for _, model := range report.Models {
-		gpuLabel := formatModelGPU(model.GPU, gpuNames)
-		if idx, ok := parseCUDAIndex(model.GPU); ok {
-			usedGPU[idx] = true
-		}
-		rows = append(rows, statusRow{
-			Node:   "local",
-			GPU:    gpuLabel,
-			Model:  model.Name,
-			Port:   fmt.Sprintf("%d", model.Port),
-			PID:    fmt.Sprintf("%d", model.PID),
-			Uptime: process.FormatDuration(model.Uptime),
-		})
-	}
-
-	for _, gpu := range report.Node.GPUs {
-		if usedGPU[gpu.Index] {
-			continue
-		}
-		rows = append(rows, statusRow{
-			Node:   "local",
-			GPU:    fmt.Sprintf("cuda:%d (%s)", gpu.Index, gpu.Name),
-			Model:  "(idle)",
-			Port:   "—",
-			PID:    "—",
-			Uptime: "—",
-		})
-	}
-
-	return rows
-}
-
-func formatModelGPU(gpu string, names map[int]string) string {
-	if idx, ok := parseCUDAIndex(gpu); ok {
-		if name, ok := names[idx]; ok && name != "" {
-			return fmt.Sprintf("%s (%s)", gpu, name)
-		}
-	}
-	return gpu
 }
 
 func parseCUDAIndex(gpu string) (int, bool) {
