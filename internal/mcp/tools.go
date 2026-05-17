@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"os"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -100,6 +101,9 @@ func (r *Runner) registerTools() {
 }
 
 func (r *Runner) toolStatus(ctx context.Context, req mcpkit.CallToolRequest) (*mcpkit.CallToolResult, error) {
+	logToolStart("nollama_status", req.GetArguments())
+	defer logToolEnd("nollama_status")
+
 	node := strings.TrimSpace(argString(req.GetArguments(), "node"))
 	text, err := r.statusText(ctx, node)
 	if err != nil {
@@ -109,6 +113,9 @@ func (r *Runner) toolStatus(ctx context.Context, req mcpkit.CallToolRequest) (*m
 }
 
 func (r *Runner) toolLoad(ctx context.Context, req mcpkit.CallToolRequest) (*mcpkit.CallToolResult, error) {
+	logToolStart("nollama_load", req.GetArguments())
+	defer logToolEnd("nollama_load")
+
 	args := req.GetArguments()
 	modelName := strings.TrimSpace(argString(args, "model"))
 	if modelName == "" {
@@ -139,6 +146,9 @@ func (r *Runner) toolLoad(ctx context.Context, req mcpkit.CallToolRequest) (*mcp
 }
 
 func (r *Runner) toolUnload(ctx context.Context, req mcpkit.CallToolRequest) (*mcpkit.CallToolResult, error) {
+	logToolStart("nollama_unload", req.GetArguments())
+	defer logToolEnd("nollama_unload")
+
 	args := req.GetArguments()
 	modelName := strings.TrimSpace(argString(args, "model"))
 	if modelName == "" {
@@ -160,6 +170,9 @@ func (r *Runner) toolUnload(ctx context.Context, req mcpkit.CallToolRequest) (*m
 }
 
 func (r *Runner) toolModels(ctx context.Context, req mcpkit.CallToolRequest) (*mcpkit.CallToolResult, error) {
+	logToolStart("nollama_models", req.GetArguments())
+	defer logToolEnd("nollama_models")
+
 	node := strings.TrimSpace(argString(req.GetArguments(), "node"))
 	if node != "" {
 		client, err := r.clientForNode(node)
@@ -234,6 +247,9 @@ func (r *Runner) toolModels(ctx context.Context, req mcpkit.CallToolRequest) (*m
 }
 
 func (r *Runner) toolPull(ctx context.Context, req mcpkit.CallToolRequest) (*mcpkit.CallToolResult, error) {
+	logToolStart("nollama_pull", req.GetArguments())
+	defer logToolEnd("nollama_pull")
+
 	args := req.GetArguments()
 	spec := strings.TrimSpace(argString(args, "spec"))
 	if spec == "" {
@@ -256,6 +272,9 @@ func (r *Runner) toolPull(ctx context.Context, req mcpkit.CallToolRequest) (*mcp
 }
 
 func (r *Runner) toolInspect(ctx context.Context, req mcpkit.CallToolRequest) (*mcpkit.CallToolResult, error) {
+	logToolStart("nollama_inspect", req.GetArguments())
+	defer logToolEnd("nollama_inspect")
+
 	modelName := strings.TrimSpace(argString(req.GetArguments(), "model"))
 	if modelName == "" {
 		return mcpkit.NewToolResultError("model is required"), nil
@@ -299,6 +318,9 @@ func (r *Runner) toolInspect(ctx context.Context, req mcpkit.CallToolRequest) (*
 }
 
 func (r *Runner) toolRuntimes(ctx context.Context, req mcpkit.CallToolRequest) (*mcpkit.CallToolResult, error) {
+	logToolStart("nollama_runtimes", req.GetArguments())
+	defer logToolEnd("nollama_runtimes")
+
 	mgr := runtime.NewManager()
 	runtimes, err := mgr.List()
 	if err != nil {
@@ -323,6 +345,9 @@ func (r *Runner) toolRuntimes(ctx context.Context, req mcpkit.CallToolRequest) (
 }
 
 func (r *Runner) toolRm(ctx context.Context, req mcpkit.CallToolRequest) (*mcpkit.CallToolResult, error) {
+	logToolStart("nollama_rm", req.GetArguments())
+	defer logToolEnd("nollama_rm")
+
 	args := req.GetArguments()
 	modelName := strings.TrimSpace(argString(args, "model"))
 	if modelName == "" {
@@ -632,4 +657,12 @@ func resolveLocalModelDir(cfg *config.Config) (string, error) {
 		}
 	}
 	return config.DefaultConfig().ModelDir, nil
+}
+
+func logToolStart(name string, args map[string]any) {
+	fmt.Fprintf(os.Stderr, "mcp tool start: %s args=%v\n", name, args)
+}
+
+func logToolEnd(name string) {
+	fmt.Fprintf(os.Stderr, "mcp tool end: %s\n", name)
 }
