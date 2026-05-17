@@ -827,9 +827,6 @@ func init() {
 	// unload flags
 	unloadCmd.Flags().IntVar(&unloadPort, "port", 0, "Stop process by port number instead of model name")
 
-	// serve flags
-	serveCmd.Flags().Bool("mcp", false, "Enable MCP server")
-
 	// cp flags
 	cpCmd.Flags().String("to", "", "Target node for copy")
 }
