@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 
 	"gopkg.in/yaml.v3"
 )
@@ -69,6 +70,9 @@ type AutoloadEntry struct {
 
 	// Runtime selects which llama-server runtime to use.
 	Runtime string `yaml:"runtime"`
+
+	// Profiles are named built-in flag bundles applied before explicit flags.
+	Profiles []string `yaml:"profiles"`
 
 	// Flags are llama-server flags for this model.
 	Flags map[string]interface{} `yaml:"flags"`
@@ -164,8 +168,19 @@ func FindConfig() string {
 }
 
 // MergedFlags returns the autoload entry's flags merged on top of global defaults.
-// Entry flags override defaults.
+// Profile flags override defaults and explicit entry flags override profiles.
 func (c *Config) MergedFlags(entry AutoloadEntry) map[string]interface{} {
+	merged, _, err := c.MergedFlagsWithProfiles(entry)
+	if err != nil {
+		// Preserve the historical signature for callers that only need flags.
+		// Profile lookup failures are handled by MergedFlagsWithProfiles users.
+		return cloneFlags(c.Defaults)
+	}
+	return merged
+}
+
+// MergedFlagsWithProfiles merges defaults, profiles, and entry flags in order.
+func (c *Config) MergedFlagsWithProfiles(entry AutoloadEntry) (map[string]interface{}, []ProfileRequires, error) {
 	merged := make(map[string]interface{})
 
 	// Start with global defaults
@@ -173,12 +188,43 @@ func (c *Config) MergedFlags(entry AutoloadEntry) map[string]interface{} {
 		merged[k] = v
 	}
 
+	if len(entry.Profiles) > 0 {
+		loaded := make([]Profile, 0, len(entry.Profiles))
+		for _, name := range entry.Profiles {
+			profile, err := LoadProfile(name)
+			if err != nil {
+				return nil, nil, err
+			}
+			loaded = append(loaded, profile)
+		}
+		profileMerge := MergeProfiles(loaded)
+		for k, v := range profileMerge.Flags {
+			merged[k] = v
+		}
+
+		// Explicit entry runtime takes precedence over profile requirements.
+		reqs := append([]ProfileRequires(nil), profileMerge.Requires...)
+		if entry.Runtime != "" {
+			reqs = append(reqs, ProfileRequires{Runtime: entry.Runtime})
+		}
+
+		// Override with per-model flags
+		for k, v := range entry.Flags {
+			merged[k] = v
+		}
+		return merged, reqs, nil
+	}
+
 	// Override with per-model flags
 	for k, v := range entry.Flags {
 		merged[k] = v
 	}
 
-	return merged
+	reqs := []ProfileRequires{}
+	if entry.Runtime != "" {
+		reqs = append(reqs, ProfileRequires{Runtime: entry.Runtime})
+	}
+	return merged, reqs, nil
 }
 
 // ModelPath returns the full path to a model file.
@@ -207,4 +253,50 @@ func defaultModelDir() string {
 		return filepath.Join(home, ".local", "share", "nollama", "models")
 	}
 	return "/var/lib/nollama/models"
+}
+
+func cloneFlags(flags map[string]interface{}) map[string]interface{} {
+	if len(flags) == 0 {
+		return map[string]interface{}{}
+	}
+	cloned := make(map[string]interface{}, len(flags))
+	for k, v := range flags {
+		cloned[k] = v
+	}
+	return cloned
+}
+
+// CloneFlags returns a shallow copy of a flag map.
+func CloneFlags(flags map[string]interface{}) map[string]interface{} {
+	return cloneFlags(flags)
+}
+
+// FlagsMapToSlice converts a map of flag names to a deterministic argv slice.
+// e.g. {"ctx-size": 131072, "flash-attn": "on"} -> ["--ctx-size", "131072", "--flash-attn", "on"]
+func FlagsMapToSlice(flags map[string]interface{}) []string {
+	if len(flags) == 0 {
+		return nil
+	}
+
+	keys := make([]string, 0, len(flags))
+	for key := range flags {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+
+	var result []string
+	for _, key := range keys {
+		flag := "--" + key
+		switch val := flags[key].(type) {
+		case bool:
+			if val {
+				result = append(result, flag)
+			}
+		case string:
+			result = append(result, flag, val)
+		default:
+			result = append(result, flag, fmt.Sprintf("%v", val))
+		}
+	}
+	return result
 }

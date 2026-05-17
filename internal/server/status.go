@@ -3,6 +3,8 @@ package server
 import (
 	"encoding/json"
 	"net/http"
+	"sort"
+	"strings"
 	"time"
 
 	"github.com/hirdforge/nollama/internal/hardware"
@@ -15,6 +17,7 @@ type statusResponse struct {
 
 type statusModel struct {
 	Name          string `json:"name"`
+	Alias         string `json:"alias,omitempty"`
 	Port          int    `json:"port"`
 	GPU           string `json:"gpu"`
 	PID           int    `json:"pid"`
@@ -76,9 +79,23 @@ func (s *Server) buildStatusResponse() statusResponse {
 
 	procs := s.procMgr.List()
 	resp.Models = make([]statusModel, 0, len(procs))
+	aliasesByModel := make(map[string][]string)
+	for alias, target := range s.cfg.Aliases {
+		stem := strings.ToLower(strings.TrimSuffix(target, ".gguf"))
+		aliasesByModel[stem] = append(aliasesByModel[stem], alias)
+	}
+	for stem := range aliasesByModel {
+		sort.Strings(aliasesByModel[stem])
+	}
 	for _, proc := range procs {
+		stem := strings.ToLower(strings.TrimSuffix(proc.ModelName, ".gguf"))
+		alias := ""
+		if names := aliasesByModel[stem]; len(names) > 0 {
+			alias = strings.Join(names, ",")
+		}
 		resp.Models = append(resp.Models, statusModel{
 			Name:          proc.ModelName,
+			Alias:         alias,
 			Port:          proc.Port,
 			GPU:           proc.GPUIndex,
 			PID:           proc.PID,

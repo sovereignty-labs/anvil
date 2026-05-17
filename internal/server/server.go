@@ -19,6 +19,7 @@ import (
 	"github.com/hirdforge/nollama/internal/hardware"
 	nollamamcp "github.com/hirdforge/nollama/internal/mcp"
 	"github.com/hirdforge/nollama/internal/process"
+	runtimemgr "github.com/hirdforge/nollama/internal/runtime"
 )
 
 // Server is the nollama serve daemon.
@@ -260,9 +261,18 @@ func (s *Server) loadModel(entry config.AutoloadEntry, hw *hardware.Inventory) (
 		opts.GPU = *entry.GPU
 	}
 
-	// Merge flags: global defaults + per-model
-	merged := s.cfg.MergedFlags(entry)
-	opts.ExtraFlags = flagsMapToSlice(merged)
+	// Merge flags: defaults + profiles + per-model
+	merged, requires, err := s.cfg.MergedFlagsWithProfiles(entry)
+	if err != nil {
+		return 0, err
+	}
+	for _, warning := range s.profileWarnings(requires) {
+		s.logger.Warn("autoload profile requirement mismatch",
+			"model", entry.Model,
+			"warning", warning,
+		)
+	}
+	opts.ExtraFlags = config.FlagsMapToSlice(merged)
 
 	// Hardware for smart defaults
 	if hw != nil {
@@ -282,6 +292,14 @@ func (s *Server) loadModel(entry config.AutoloadEntry, hw *hardware.Inventory) (
 	}
 
 	return s.procMgr.StartOptsStart(opts)
+}
+
+func (s *Server) profileWarnings(requires []config.ProfileRequires) []string {
+	activeRuntime, err := runtimemgr.NewManager().ActiveName()
+	if err != nil {
+		activeRuntime = ""
+	}
+	return config.ProfileRuntimeWarnings(requires, activeRuntime)
 }
 
 // reconcileModels compares desired state (config autoload) with actual state
@@ -353,24 +371,4 @@ func (s *Server) detectHardware() *hardware.Inventory {
 		)
 	}
 	return inv
-}
-
-// flagsMapToSlice converts a map of flag names to values into a string slice.
-// e.g. {"ctx-size": 131072, "flash-attn": "on"} → ["--ctx-size", "131072", "--flash-attn", "on"]
-func flagsMapToSlice(flags map[string]interface{}) []string {
-	var result []string
-	for k, v := range flags {
-		flag := fmt.Sprintf("--%s", k)
-		switch val := v.(type) {
-		case bool:
-			if val {
-				result = append(result, flag)
-			}
-		case string:
-			result = append(result, flag, val)
-		default:
-			result = append(result, flag, fmt.Sprintf("%v", val))
-		}
-	}
-	return result
 }

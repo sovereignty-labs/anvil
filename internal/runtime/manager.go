@@ -375,6 +375,14 @@ func (m *Manager) Resolve() (string, error) {
 	return bin, nil
 }
 
+// ActiveName returns the configured active runtime name, if any.
+func (m *Manager) ActiveName() (string, error) {
+	if err := m.ensureDir(); err != nil {
+		return "", fmt.Errorf("prepare runtimes dir: %w", err)
+	}
+	return m.readActiveName()
+}
+
 func (m *Manager) readActiveName() (string, error) {
 	data, err := os.ReadFile(m.activeFilePath())
 	if err != nil {

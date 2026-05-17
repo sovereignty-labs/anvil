@@ -117,6 +117,36 @@ func TestProxyAliasRouting(t *testing.T) {
 	}
 }
 
+func TestProxyAliasWinsOverFuzzyMatch(t *testing.T) {
+	aliasBackend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(`{"source":"alias"}`))
+	}))
+	defer aliasBackend.Close()
+
+	fuzzyBackend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(`{"source":"fuzzy"}`))
+	}))
+	defer fuzzyBackend.Close()
+
+	p := NewProxy(nil)
+	p.AddRoute("qwen3.6-35B-A3B-Q4_K_S.gguf", extractPort(aliasBackend.URL))
+	p.AddRoute("advisor-general.gguf", extractPort(fuzzyBackend.URL))
+	p.SetAliases(map[string]string{
+		"advisor": "qwen3.6-35B-A3B-Q4_K_S",
+	})
+
+	req := httptest.NewRequest("POST", "/v1/chat/completions", strings.NewReader(`{"model":"advisor","messages":[]}`))
+	rec := httptest.NewRecorder()
+	p.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected alias routing to succeed, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), `"source":"alias"`) {
+		t.Fatalf("expected alias route to win over fuzzy match, got %s", rec.Body.String())
+	}
+}
+
 func TestProxyNoModels(t *testing.T) {
 	p := NewProxy(nil)
 
