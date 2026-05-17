@@ -87,6 +87,14 @@ func (r *Runner) Start(ctx context.Context) error {
 	}
 }
 
+// UpdateConfig replaces the runner's config (called on SIGHUP reload).
+func (r *Runner) UpdateConfig(cfg *config.Config) {
+	if r == nil {
+		return
+	}
+	r.cfg = cfg
+}
+
 // Shutdown stops the MCP transport.
 func (r *Runner) Shutdown(ctx context.Context) error {
 	if r == nil {
