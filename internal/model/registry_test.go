@@ -149,6 +149,33 @@ func TestScanDirIgnoresSubdirs(t *testing.T) {
 	}
 }
 
+func TestScanDirCacheHit(t *testing.T) {
+	ClearMetadataCache()
+	dir := t.TempDir()
+
+	for _, name := range []string{"model-a.gguf", "model-b.gguf"} {
+		os.WriteFile(filepath.Join(dir, name), []byte("fake"), 0644)
+	}
+
+	models1, err := ScanDir(dir)
+	if err != nil {
+		t.Fatalf("first ScanDir: %v", err)
+	}
+	models2, err := ScanDir(dir)
+	if err != nil {
+		t.Fatalf("second ScanDir: %v", err)
+	}
+
+	if len(models1) != len(models2) {
+		t.Errorf("got different counts: %d vs %d", len(models1), len(models2))
+	}
+}
+
+func TestClearMetadataCache(t *testing.T) {
+	ClearMetadataCache()
+	ClearMetadataCache()
+}
+
 func TestModelInfoSizeHuman(t *testing.T) {
 	tests := []struct {
 		bytes int64
