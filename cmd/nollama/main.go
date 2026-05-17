@@ -257,7 +257,7 @@ func runLoad(cmd *cobra.Command, args []string) error {
 	if client, err := resolveNodeClient(cmd); err != nil {
 		return err
 	} else if client != nil {
-		req, appliedProfiles, warnings, err := buildRemoteLoadRequest(cmd, modelPath, cfg)
+		req, appliedProfiles, warnings, err := buildRemoteLoadRequest(cmd, modelPath)
 		if err != nil {
 			return err
 		}
@@ -319,11 +319,11 @@ func runLoad(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("flag computation failed: %w", err)
 	}
 
-	overlayFlags, appliedProfiles, warnings, err := resolveLoadOverlay(cmd, cfg)
+	overlayFlags, appliedProfiles, warnings, err := resolveLoadOverlay(cmd)
 	if err != nil {
 		return err
 	}
-	result.Flags = process.MergePassthroughFlags(result.Flags, flagsMapToSlice(overlayFlags))
+	result.Flags = process.MergePassthroughFlags(result.Flags, config.FlagsMapToSlice(overlayFlags))
 	result.Command = buildCommand(llamaServerFlag, result.Flags)
 
 	if dryRun {
@@ -717,7 +717,7 @@ func sortedRemoteNames(remotes map[string]string) []string {
 	return names
 }
 
-func buildRemoteLoadRequest(cmd *cobra.Command, modelPath string, cfg *config.Config) (federation.LoadRequest, []string, []string, error) {
+func buildRemoteLoadRequest(cmd *cobra.Command, modelPath string) (federation.LoadRequest, []string, []string, error) {
 	gpu, err := cmd.Flags().GetInt("gpu")
 	if err != nil {
 		return federation.LoadRequest{}, nil, nil, err
@@ -726,7 +726,7 @@ func buildRemoteLoadRequest(cmd *cobra.Command, modelPath string, cfg *config.Co
 	if err != nil {
 		return federation.LoadRequest{}, nil, nil, err
 	}
-	overlayFlags, appliedProfiles, warnings, err := resolveLoadOverlay(cmd, cfg)
+	overlayFlags, appliedProfiles, warnings, err := resolveLoadOverlay(cmd)
 	if err != nil {
 		return federation.LoadRequest{}, nil, nil, err
 	}
@@ -878,23 +878,14 @@ func loadCLIConfig() (*config.Config, error) {
 	return config.Load(cfgPath)
 }
 
-func resolveLoadOverlay(cmd *cobra.Command, cfg *config.Config) (map[string]interface{}, []string, []string, error) {
-	if cfg == nil {
-		cfg = config.DefaultConfig()
-	}
-
-	merged := make(map[string]interface{}, len(cfg.Defaults))
-	for k, v := range cfg.Defaults {
-		merged[k] = v
-	}
-
+func resolveLoadOverlay(cmd *cobra.Command) (map[string]interface{}, []string, []string, error) {
 	profileNames, err := cmd.Flags().GetStringSlice("profile")
 	if err != nil {
 		return nil, nil, nil, err
 	}
 	profileNames = compactStrings(profileNames)
 	if len(profileNames) == 0 {
-		return merged, nil, nil, nil
+		return map[string]interface{}{}, nil, nil, nil
 	}
 
 	loaded := make([]config.Profile, 0, len(profileNames))
@@ -907,16 +898,12 @@ func resolveLoadOverlay(cmd *cobra.Command, cfg *config.Config) (map[string]inte
 	}
 
 	mergedProfiles := config.MergeProfiles(loaded)
-	for k, v := range mergedProfiles.Flags {
-		merged[k] = v
-	}
-
 	activeRuntime, err := runtimemgr.NewManager().ActiveName()
 	if err != nil {
 		activeRuntime = ""
 	}
 
-	return merged, profileNames, config.ProfileRuntimeWarnings(mergedProfiles.Requires, activeRuntime), nil
+	return config.CloneFlags(mergedProfiles.Flags), profileNames, config.ProfileRuntimeWarnings(mergedProfiles.Requires, activeRuntime), nil
 }
 
 func compactStrings(values []string) []string {
@@ -928,34 +915,6 @@ func compactStrings(values []string) []string {
 		}
 	}
 	return out
-}
-
-func flagsMapToSlice(flags map[string]interface{}) []string {
-	if len(flags) == 0 {
-		return nil
-	}
-
-	keys := make([]string, 0, len(flags))
-	for key := range flags {
-		keys = append(keys, key)
-	}
-	sort.Strings(keys)
-
-	var result []string
-	for _, key := range keys {
-		flag := "--" + key
-		switch val := flags[key].(type) {
-		case bool:
-			if val {
-				result = append(result, flag)
-			}
-		case string:
-			result = append(result, flag, val)
-		default:
-			result = append(result, flag, fmt.Sprintf("%v", val))
-		}
-	}
-	return result
 }
 
 func buildCommand(binary string, flags []string) string {

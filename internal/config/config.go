@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 
 	"gopkg.in/yaml.v3"
 )
@@ -263,4 +264,39 @@ func cloneFlags(flags map[string]interface{}) map[string]interface{} {
 		cloned[k] = v
 	}
 	return cloned
+}
+
+// CloneFlags returns a shallow copy of a flag map.
+func CloneFlags(flags map[string]interface{}) map[string]interface{} {
+	return cloneFlags(flags)
+}
+
+// FlagsMapToSlice converts a map of flag names to a deterministic argv slice.
+// e.g. {"ctx-size": 131072, "flash-attn": "on"} -> ["--ctx-size", "131072", "--flash-attn", "on"]
+func FlagsMapToSlice(flags map[string]interface{}) []string {
+	if len(flags) == 0 {
+		return nil
+	}
+
+	keys := make([]string, 0, len(flags))
+	for key := range flags {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+
+	var result []string
+	for _, key := range keys {
+		flag := "--" + key
+		switch val := flags[key].(type) {
+		case bool:
+			if val {
+				result = append(result, flag)
+			}
+		case string:
+			result = append(result, flag, val)
+		default:
+			result = append(result, flag, fmt.Sprintf("%v", val))
+		}
+	}
+	return result
 }
