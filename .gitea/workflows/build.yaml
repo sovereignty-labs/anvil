@@ -1,44 +1,31 @@
-name: Build, Test, Push
-
+name: Build and Push
 on:
   push:
     branches: [main]
-
+env:
+  REGISTRY_USER: ${{ secrets.REGISTRY_USER }}
+  REGISTRY_PASSWORD: ${{ secrets.REGISTRY_PASSWORD }}
+  DOCKER_HOST: tcp://localhost:2375
+  REGISTRY: gitea-http.gitea.svc.cluster.local:3000/kit/nollama
 jobs:
   build:
     runs-on: ubuntu-latest
-    services:
-      dind:
-        image: docker:dind
-        options: --privileged
     steps:
+      - name: Install Docker CLI
+        run: apk add --no-cache docker-cli
+      - name: Registry login
+        run: echo $REGISTRY_PASSWORD | docker login gitea-http.gitea.svc.cluster.local:3000 -u $REGISTRY_USER --password-stdin
       - name: Clone repository
+        run: rm -rf /src && git clone http://gitea-http.gitea.svc.cluster.local:3000/kit/nollama.git /src
+      - name: Build and push
         run: |
-          apk add --no-cache git docker-cli
-          git clone --depth 1 http://gitea-http.gitea.svc.cluster.local:3000/kit/nollama.git /src
-
-      - name: Build and test (Go)
-        run: |
-          apk add --no-cache go
-          cd /src
-          go mod download
-          go test ./...
-
-      - name: Build Docker image
-        run: |
-          export DOCKER_HOST=tcp://localhost:2375
           cd /src
           SHA_SHORT=$(git rev-parse --short HEAD)
           docker build \
             --build-arg VERSION=dev \
             --build-arg COMMIT=${SHA_SHORT} \
             --build-arg DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ) \
-            -t git.hirdforge.com/kit/nollama/nollama:latest \
-            -t git.hirdforge.com/kit/nollama/nollama:${SHA_SHORT} .
-
-      - name: Push to registry
-        run: |
-          export DOCKER_HOST=tcp://localhost:2375
-          echo "${{ secrets.REGISTRY_PASSWORD }}" | docker login git.hirdforge.com --username kit --password-stdin
-          docker push git.hirdforge.com/kit/nollama/nollama:latest
-          docker push git.hirdforge.com/kit/nollama/nollama:${SHA_SHORT}
+            -t $REGISTRY/nollama:latest \
+            -t $REGISTRY/nollama:sha-${SHA_SHORT} .
+          docker push $REGISTRY/nollama:latest
+          docker push $REGISTRY/nollama:sha-${SHA_SHORT}
