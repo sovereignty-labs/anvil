@@ -53,6 +53,13 @@ func TestToolStatusAggregatesLocalAndRemote(t *testing.T) {
 }
 
 func TestToolLoadUnloadModelsPullAndRm(t *testing.T) {
+	dir := t.TempDir()
+	_ = writeTestGGUF(t, dir, "local-Q8_K_XL.gguf", []testKV{
+		{"general.architecture", model.GGUFTypeString, "llama"},
+		{"general.context_length", model.GGUFTypeUint64, uint64(8192)},
+		{"general.file_type", model.GGUFTypeUint32, uint32(7)},
+	})
+
 	modelSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/api/load":
@@ -102,6 +109,7 @@ func TestToolLoadUnloadModelsPullAndRm(t *testing.T) {
 	localURL, _ := url.Parse(modelSrv.URL)
 	cfg := config.DefaultConfig()
 	cfg.Bind = localURL.Host
+	cfg.ModelDir = dir
 
 	runner := NewRunner(cfg, filepath.Join(t.TempDir(), "remotes.yaml"))
 
@@ -128,7 +136,7 @@ func TestToolLoadUnloadModelsPullAndRm(t *testing.T) {
 		t.Fatal(err)
 	}
 	assertTextContains(t, modelsRes, "MODEL")
-	assertTextContains(t, modelsRes, "gpu-host")
+	assertTextContains(t, modelsRes, "local-Q8_K_XL")
 
 	pullRes, err := runner.toolPull(context.Background(), callTool("nollama_pull", map[string]any{
 		"spec": "unsloth/Qwen3.6-35B-A3B-GGUF:Q4_K_S",

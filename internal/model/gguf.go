@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"regexp"
 	"strings"
 )
 
@@ -109,6 +110,8 @@ var fileTypeNames = map[uint32]string{
 	// Q3_K_XL etc. are not in the enum -- they use Q3_K_L as base type
 	// and the actual quant identity comes from the filename or tensor inspection.
 }
+
+var quantPattern = regexp.MustCompile(`(?i)[_-]((?:IQ|Q)\d+(?:_K)?(?:_[A-Z0-9]+)*|BF16|F16|F32|MXFP4)(?:[_.-]|$)`)
 
 // ParseGGUF reads the GGUF header and metadata from the given file path.
 // It does NOT load tensor data -- only the metadata key-value pairs.
@@ -297,14 +300,9 @@ func (m *GGUFMetadata) ArchDisplayName() string {
 }
 
 func (m *GGUFMetadata) QuantDisplayName(filename string) string {
-	upper := strings.ToUpper(filename)
-	communityQuants := []string{
-		"Q3_K_XL", "Q4_K_XL", "Q5_K_XL", "Q6_K_XL",
-		"IQ1_M", "IQ2_M", "IQ3_M", "IQ4_NL",
-	}
-	for _, q := range communityQuants {
-		if strings.Contains(upper, q) {
-			return q
+	if filename != "" {
+		if matches := quantPattern.FindStringSubmatch(strings.ToUpper(filename)); len(matches) == 2 {
+			return matches[1]
 		}
 	}
 	if m.QuantName != "" {
@@ -322,70 +320,90 @@ type ggufReader struct {
 }
 
 func (g *ggufReader) readU8() uint8 {
-	if g.err != nil { return 0 }
+	if g.err != nil {
+		return 0
+	}
 	var v uint8
 	g.err = binary.Read(g.r, g.order, &v)
 	return v
 }
 
 func (g *ggufReader) readI8() int8 {
-	if g.err != nil { return 0 }
+	if g.err != nil {
+		return 0
+	}
 	var v int8
 	g.err = binary.Read(g.r, g.order, &v)
 	return v
 }
 
 func (g *ggufReader) readU16() uint16 {
-	if g.err != nil { return 0 }
+	if g.err != nil {
+		return 0
+	}
 	var v uint16
 	g.err = binary.Read(g.r, g.order, &v)
 	return v
 }
 
 func (g *ggufReader) readI16() int16 {
-	if g.err != nil { return 0 }
+	if g.err != nil {
+		return 0
+	}
 	var v int16
 	g.err = binary.Read(g.r, g.order, &v)
 	return v
 }
 
 func (g *ggufReader) readU32() uint32 {
-	if g.err != nil { return 0 }
+	if g.err != nil {
+		return 0
+	}
 	var v uint32
 	g.err = binary.Read(g.r, g.order, &v)
 	return v
 }
 
 func (g *ggufReader) readI32() int32 {
-	if g.err != nil { return 0 }
+	if g.err != nil {
+		return 0
+	}
 	var v int32
 	g.err = binary.Read(g.r, g.order, &v)
 	return v
 }
 
 func (g *ggufReader) readU64() uint64 {
-	if g.err != nil { return 0 }
+	if g.err != nil {
+		return 0
+	}
 	var v uint64
 	g.err = binary.Read(g.r, g.order, &v)
 	return v
 }
 
 func (g *ggufReader) readI64() int64 {
-	if g.err != nil { return 0 }
+	if g.err != nil {
+		return 0
+	}
 	var v int64
 	g.err = binary.Read(g.r, g.order, &v)
 	return v
 }
 
 func (g *ggufReader) readF32() float32 {
-	if g.err != nil { return 0 }
+	if g.err != nil {
+		return 0
+	}
 	var v float32
 	g.err = binary.Read(g.r, g.order, &v)
 	return v
 }
 
 func (g *ggufReader) readF64() float64 {
-	if g.err != nil { return 0 }
+	if g.err != nil {
+		return 0
+	}
 	var v float64
 	g.err = binary.Read(g.r, g.order, &v)
 	return v
@@ -396,35 +414,56 @@ func (g *ggufReader) readBool() bool {
 }
 
 func (g *ggufReader) readString() string {
-	if g.err != nil { return "" }
+	if g.err != nil {
+		return ""
+	}
 	length := g.readU64()
-	if g.err != nil { return "" }
+	if g.err != nil {
+		return ""
+	}
 	if length > 10_000_000 {
 		g.err = fmt.Errorf("string too long: %d bytes", length)
 		return ""
 	}
 	buf := make([]byte, length)
 	_, g.err = io.ReadFull(g.r, buf)
-	if g.err != nil { return "" }
+	if g.err != nil {
+		return ""
+	}
 	return string(buf)
 }
 
 func (g *ggufReader) readValue(vtype uint32) any {
-	if g.err != nil { return nil }
+	if g.err != nil {
+		return nil
+	}
 	switch vtype {
-	case GGUFTypeUint8:   return g.readU8()
-	case GGUFTypeInt8:    return g.readI8()
-	case GGUFTypeUint16:  return g.readU16()
-	case GGUFTypeInt16:   return g.readI16()
-	case GGUFTypeUint32:  return g.readU32()
-	case GGUFTypeInt32:   return g.readI32()
-	case GGUFTypeFloat32: return g.readF32()
-	case GGUFTypeBool:    return g.readBool()
-	case GGUFTypeString:  return g.readString()
-	case GGUFTypeUint64:  return g.readU64()
-	case GGUFTypeInt64:   return g.readI64()
-	case GGUFTypeFloat64: return g.readF64()
-	case GGUFTypeArray:   return g.readArray()
+	case GGUFTypeUint8:
+		return g.readU8()
+	case GGUFTypeInt8:
+		return g.readI8()
+	case GGUFTypeUint16:
+		return g.readU16()
+	case GGUFTypeInt16:
+		return g.readI16()
+	case GGUFTypeUint32:
+		return g.readU32()
+	case GGUFTypeInt32:
+		return g.readI32()
+	case GGUFTypeFloat32:
+		return g.readF32()
+	case GGUFTypeBool:
+		return g.readBool()
+	case GGUFTypeString:
+		return g.readString()
+	case GGUFTypeUint64:
+		return g.readU64()
+	case GGUFTypeInt64:
+		return g.readI64()
+	case GGUFTypeFloat64:
+		return g.readF64()
+	case GGUFTypeArray:
+		return g.readArray()
 	default:
 		g.err = fmt.Errorf("unknown GGUF value type: %d", vtype)
 		return nil
@@ -432,10 +471,14 @@ func (g *ggufReader) readValue(vtype uint32) any {
 }
 
 func (g *ggufReader) readArray() []any {
-	if g.err != nil { return nil }
+	if g.err != nil {
+		return nil
+	}
 	elemType := g.readU32()
 	count := g.readU64()
-	if g.err != nil { return nil }
+	if g.err != nil {
+		return nil
+	}
 	if count > 10_000_000 {
 		g.err = fmt.Errorf("array too large: %d elements", count)
 		return nil
@@ -443,7 +486,9 @@ func (g *ggufReader) readArray() []any {
 	arr := make([]any, count)
 	for i := uint64(0); i < count; i++ {
 		arr[i] = g.readValue(elemType)
-		if g.err != nil { return nil }
+		if g.err != nil {
+			return nil
+		}
 	}
 	return arr
 }
