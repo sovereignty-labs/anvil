@@ -20,14 +20,75 @@ import (
 )
 
 func (r *Runner) registerTools() {
-	r.server.AddTool(mcpkit.NewTool("nollama_status", mcpkit.WithDescription("Fleet overview across local and remote nodes")), r.toolStatus)
-	r.server.AddTool(mcpkit.NewTool("nollama_load", mcpkit.WithDescription("Load a model on a local or remote node")), r.toolLoad)
-	r.server.AddTool(mcpkit.NewTool("nollama_unload", mcpkit.WithDescription("Unload a model from a local or remote node")), r.toolUnload)
-	r.server.AddTool(mcpkit.NewTool("nollama_models", mcpkit.WithDescription("List GGUFs on a local or remote node")), r.toolModels)
-	r.server.AddTool(mcpkit.NewTool("nollama_pull", mcpkit.WithDescription("Pull a HuggingFace model on a local or remote node")), r.toolPull)
-	r.server.AddTool(mcpkit.NewTool("nollama_inspect", mcpkit.WithDescription("Inspect a GGUF and show hardware guidance")), r.toolInspect)
-	r.server.AddTool(mcpkit.NewTool("nollama_runtimes", mcpkit.WithDescription("List installed llama-server runtimes")), r.toolRuntimes)
-	r.server.AddTool(mcpkit.NewTool("nollama_rm", mcpkit.WithDescription("Remove a local or remote model file")), r.toolRm)
+	r.server.AddTool(mcpkit.NewTool("nollama_status",
+		mcpkit.WithDescription("Fleet overview across local and remote nodes"),
+		mcpkit.WithString("node",
+			mcpkit.Description("Filter to a specific remote node"),
+		),
+	), r.toolStatus)
+	r.server.AddTool(mcpkit.NewTool("nollama_load",
+		mcpkit.WithDescription("Load a model on a local or remote node"),
+		mcpkit.WithString("model",
+			mcpkit.Required(),
+			mcpkit.Description("GGUF filename or fuzzy match"),
+		),
+		mcpkit.WithString("node",
+			mcpkit.Description("Target remote node"),
+		),
+		mcpkit.WithNumber("gpu",
+			mcpkit.Description("GPU index"),
+		),
+		mcpkit.WithObject("flags",
+			mcpkit.Description("Extra llama-server flags"),
+			mcpkit.AdditionalProperties(true),
+		),
+	), r.toolLoad)
+	r.server.AddTool(mcpkit.NewTool("nollama_unload",
+		mcpkit.WithDescription("Unload a model from a local or remote node"),
+		mcpkit.WithString("model",
+			mcpkit.Required(),
+			mcpkit.Description("Model name to unload"),
+		),
+		mcpkit.WithString("node",
+			mcpkit.Description("Target remote node"),
+		),
+	), r.toolUnload)
+	r.server.AddTool(mcpkit.NewTool("nollama_models",
+		mcpkit.WithDescription("List GGUFs on a local or remote node"),
+		mcpkit.WithString("node",
+			mcpkit.Description("Filter to a specific remote node"),
+		),
+	), r.toolModels)
+	r.server.AddTool(mcpkit.NewTool("nollama_pull",
+		mcpkit.WithDescription("Pull a HuggingFace model on a local or remote node"),
+		mcpkit.WithString("spec",
+			mcpkit.Required(),
+			mcpkit.Description("HuggingFace spec, e.g. unsloth/Qwen3.6-35B-A3B-GGUF:Q4_K_S"),
+		),
+		mcpkit.WithString("node",
+			mcpkit.Description("Target remote node"),
+		),
+	), r.toolPull)
+	r.server.AddTool(mcpkit.NewTool("nollama_inspect",
+		mcpkit.WithDescription("Inspect a GGUF and show hardware guidance"),
+		mcpkit.WithString("model",
+			mcpkit.Required(),
+			mcpkit.Description("GGUF filename or fuzzy match"),
+		),
+	), r.toolInspect)
+	r.server.AddTool(mcpkit.NewTool("nollama_runtimes",
+		mcpkit.WithDescription("List installed llama-server runtimes"),
+	), r.toolRuntimes)
+	r.server.AddTool(mcpkit.NewTool("nollama_rm",
+		mcpkit.WithDescription("Remove a local or remote model file"),
+		mcpkit.WithString("model",
+			mcpkit.Required(),
+			mcpkit.Description("Model name to remove"),
+		),
+		mcpkit.WithString("node",
+			mcpkit.Description("Target remote node"),
+		),
+	), r.toolRm)
 }
 
 func (r *Runner) toolStatus(ctx context.Context, req mcpkit.CallToolRequest) (*mcpkit.CallToolResult, error) {
