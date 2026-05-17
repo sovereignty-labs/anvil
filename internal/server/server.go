@@ -93,6 +93,7 @@ func (s *Server) Run(ctx context.Context) error {
 	mux.HandleFunc("/api/pull", s.handlePull)
 	mux.HandleFunc("/api/rm", s.handleRm)
 	mux.HandleFunc("/api/status", s.handleStatus)
+	mux.HandleFunc("/metrics", s.handleMetrics)
 	mux.Handle("/", s.proxy)
 	s.httpServer = &http.Server{
 		Addr:    s.cfg.Bind,

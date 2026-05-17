@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/hirdforge/nollama/internal/config"
 	"github.com/hirdforge/nollama/internal/hardware"
@@ -30,6 +31,7 @@ type loadRequest struct {
 	GPU   *int           `json:"gpu,omitempty"`
 	CPU   bool           `json:"cpu,omitempty"`
 	Flags map[string]any `json:"flags,omitempty"`
+	Swap  bool           `json:"swap,omitempty"`
 }
 
 type loadResponse struct {
@@ -356,6 +358,26 @@ func (s *Server) handleLoad(w http.ResponseWriter, r *http.Request) {
 
 	passthrough := config.FlagsMapToSlice(req.Flags)
 	procInfo, err := s.procMgr.Start(result, filepath.Base(req.Model), passthrough)
+	if err != nil && req.Swap {
+		lru := s.proxy.LRURoute()
+		if lru == nil {
+			writeAPIError(w, http.StatusInternalServerError, fmt.Sprintf("%v (swap: no models loaded to evict)", err))
+			return
+		}
+		s.logger.Info("swapping out LRU model",
+			"model", lru.ModelName,
+			"last_request", lru.LastRequest,
+			"idle_for", time.Since(lru.LastRequest).Round(time.Second),
+			"reason", err.Error(),
+		)
+		if _, stopErr := s.procMgr.StopByPort(lru.Port); stopErr != nil {
+			writeAPIError(w, http.StatusInternalServerError, fmt.Sprintf("evict LRU %s: %v", lru.ModelName, stopErr))
+			return
+		}
+		s.proxy.RemoveRoute(lru.ModelName)
+
+		procInfo, err = s.procMgr.Start(result, filepath.Base(req.Model), passthrough)
+	}
 	if err != nil {
 		writeAPIError(w, http.StatusInternalServerError, err.Error())
 		return
