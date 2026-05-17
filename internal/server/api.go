@@ -69,6 +69,15 @@ type pullResponse struct {
 	Size     int64  `json:"size"`
 }
 
+type rmRequest struct {
+	Model string `json:"model"`
+}
+
+type rmResponse struct {
+	Filename string `json:"filename"`
+	Deleted  bool   `json:"deleted"`
+}
+
 type uploadConflictResponse struct {
 	Error    string `json:"error"`
 	Filename string `json:"filename"`
@@ -222,6 +231,68 @@ func (s *Server) handlePull(w http.ResponseWriter, r *http.Request) {
 		Filename: filepath.Base(resultPath),
 		Size:     info.Size(),
 	})
+}
+
+func (s *Server) handleRm(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodDelete && r.Method != http.MethodPost {
+		writeMethodNotAllowed(w, http.MethodDelete)
+		return
+	}
+
+	var req rmRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeAPIError(w, http.StatusBadRequest, "invalid JSON body")
+		return
+	}
+	req.Model = strings.TrimSpace(req.Model)
+	if req.Model == "" {
+		writeAPIError(w, http.StatusBadRequest, "model is required")
+		return
+	}
+
+	models, err := model.ScanDir(s.cfg.ModelDir)
+	if err != nil {
+		writeAPIError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	available := make([]string, 0, len(models))
+	for _, m := range models {
+		available = append(available, m.Filename)
+	}
+	match := model.FuzzyMatchModel(req.Model, available)
+	if match == "" {
+		writeAPIError(w, http.StatusBadRequest, fmt.Sprintf("model not found: %s", req.Model))
+		return
+	}
+
+	for _, proc := range s.procMgr.List() {
+		if filepath.Base(proc.ModelName) == match || filepath.Base(proc.ModelName) == strings.TrimSuffix(match, ".gguf") {
+			writeAPIError(w, http.StatusConflict, fmt.Sprintf("model is currently loaded: %s", match))
+			return
+		}
+	}
+
+	finalPath := s.cfg.ModelPath(match)
+	info, err := os.Stat(finalPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			writeAPIError(w, http.StatusBadRequest, fmt.Sprintf("model not found: %s", req.Model))
+			return
+		}
+		writeAPIError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	if err := os.Remove(finalPath); err != nil {
+		writeAPIError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	writeJSON(w, http.StatusOK, rmResponse{
+		Filename: match,
+		Deleted:  true,
+	})
+	_ = info
 }
 
 func (s *Server) handleLoad(w http.ResponseWriter, r *http.Request) {

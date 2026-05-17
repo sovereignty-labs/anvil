@@ -17,6 +17,7 @@ import (
 
 	"github.com/hirdforge/nollama/internal/config"
 	"github.com/hirdforge/nollama/internal/hardware"
+	nollamamcp "github.com/hirdforge/nollama/internal/mcp"
 	"github.com/hirdforge/nollama/internal/process"
 )
 
@@ -27,6 +28,7 @@ type Server struct {
 	proxy      *Proxy
 	procMgr    *process.Manager
 	httpServer *http.Server
+	mcpRunner  *nollamamcp.Runner
 	logger     *slog.Logger
 
 	mu      sync.Mutex
@@ -88,11 +90,23 @@ func (s *Server) Run(ctx context.Context) error {
 	mux.HandleFunc("/api/models", s.handleModels)
 	mux.HandleFunc("/api/upload", s.handleUpload)
 	mux.HandleFunc("/api/pull", s.handlePull)
+	mux.HandleFunc("/api/rm", s.handleRm)
 	mux.HandleFunc("/api/status", s.handleStatus)
 	mux.Handle("/", s.proxy)
 	s.httpServer = &http.Server{
 		Addr:    s.cfg.Bind,
 		Handler: mux,
+	}
+
+	if s.cfg != nil && s.cfg.MCP != nil && s.cfg.MCP.Enabled {
+		s.mcpRunner = nollamamcp.NewRunner(s.cfg, "")
+		if err := s.mcpRunner.Start(ctx); err != nil {
+			return fmt.Errorf("start MCP server: %w", err)
+		}
+		s.logger.Info("MCP enabled",
+			"transport", s.cfg.MCP.Transport,
+			"bind", s.cfg.MCP.Bind,
+		)
 	}
 
 	// Listen first so we can report the actual address
@@ -149,6 +163,10 @@ func (s *Server) shutdown() error {
 	defer cancel()
 	if s.httpServer != nil {
 		s.httpServer.Shutdown(ctx)
+	}
+
+	if s.mcpRunner != nil {
+		_ = s.mcpRunner.Shutdown(ctx)
 	}
 
 	// Stop all llama-server processes

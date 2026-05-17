@@ -28,11 +28,13 @@ Signals:
 var (
 	serveConfigPath string
 	serveBind       string
+	serveMCP        bool
 )
 
 func init() {
 	serveCmd.Flags().StringVar(&serveConfigPath, "config", "", "Path to config file")
 	serveCmd.Flags().StringVar(&serveBind, "bind", "", "Listen address (overrides config)")
+	serveCmd.Flags().BoolVar(&serveMCP, "mcp", false, "Enable the MCP server")
 }
 
 func runServe(cmd *cobra.Command, args []string) error {
@@ -72,6 +74,18 @@ func runServe(cmd *cobra.Command, args []string) error {
 	// CLI flags override config
 	if serveBind != "" {
 		cfg.Bind = serveBind
+	}
+	if serveMCP {
+		if cfg.MCP == nil {
+			cfg.MCP = &config.MCPConfig{}
+		}
+		cfg.MCP.Enabled = true
+		if cfg.MCP.Transport == "" {
+			cfg.MCP.Transport = "stdio"
+		}
+		if cfg.MCP.Transport == "sse" && cfg.MCP.Bind == "" {
+			cfg.MCP.Bind = "127.0.0.1:11436"
+		}
 	}
 
 	// llama-server path from persistent flag or env

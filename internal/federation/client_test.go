@@ -304,3 +304,37 @@ func TestClientPullError(t *testing.T) {
 		t.Fatal("expected pull error")
 	}
 }
+
+func TestClientRm(t *testing.T) {
+	var seenBody []byte
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/api/rm" {
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Fatal(err)
+		}
+		seenBody = body
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"filename": "gpu-host.gguf",
+			"deleted":  true,
+		})
+	}))
+	defer srv.Close()
+
+	client := NewClient(srv.URL)
+	if err := client.Rm("gpu-host"); err != nil {
+		t.Fatalf("Rm failed: %v", err)
+	}
+
+	var req struct {
+		Model string `json:"model"`
+	}
+	if err := json.Unmarshal(seenBody, &req); err != nil {
+		t.Fatalf("unmarshal request body: %v", err)
+	}
+	if req.Model != "gpu-host" {
+		t.Fatalf("model = %q, want gpu-host", req.Model)
+	}
+}

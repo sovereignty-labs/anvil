@@ -233,9 +233,7 @@ var rmCmd = &cobra.Command{
 	Use:   "rm <model.gguf>",
 	Short: "Remove a downloaded model",
 	Args:  cobra.ExactArgs(1),
-	RunE: func(cmd *cobra.Command, args []string) error {
-		return fmt.Errorf("not implemented yet — coming in S2+")
-	},
+	RunE:  runRM,
 }
 
 // --- cp ---
@@ -599,6 +597,60 @@ func runCP(cmd *cobra.Command, args []string) error {
 	}
 
 	fmt.Printf("Copied %s to %s (%s, sha256: %s)\n", info.Filename, target, humanSize(info.SizeBytes), localSHA)
+	return nil
+}
+
+func runRM(cmd *cobra.Command, args []string) error {
+	target := args[0]
+
+	if client, err := resolveNodeClient(cmd); err != nil {
+		return err
+	} else if client != nil {
+		if err := client.Rm(target); err != nil {
+			return err
+		}
+		nodeName, _ := cmd.Flags().GetString("node")
+		fmt.Printf("Removed %s from %s\n", filepath.Base(target), nodeName)
+		return nil
+	}
+
+	dir, err := resolveLocalModelDir()
+	if err != nil {
+		return err
+	}
+
+	models, err := model.ScanDir(dir)
+	if err != nil {
+		return fmt.Errorf("scanning models: %w", err)
+	}
+	if len(models) == 0 {
+		return fmt.Errorf("no GGUF models found in %s", dir)
+	}
+
+	names := make([]string, 0, len(models))
+	modelByName := make(map[string]model.ModelInfo, len(models))
+	for _, m := range models {
+		names = append(names, m.Filename)
+		modelByName[m.Filename] = m
+	}
+
+	match := model.FuzzyMatchModel(target, names)
+	if match == "" {
+		return fmt.Errorf("no local model matches %q in %s", target, dir)
+	}
+
+	for _, proc := range process.GetManager().List() {
+		if filepath.Base(proc.ModelName) == match || strings.TrimSuffix(filepath.Base(proc.ModelName), ".gguf") == strings.TrimSuffix(match, ".gguf") {
+			return fmt.Errorf("model is currently loaded: %s", match)
+		}
+	}
+
+	info := modelByName[match]
+	if err := os.Remove(info.Path); err != nil {
+		return fmt.Errorf("removing %s: %w", info.Path, err)
+	}
+
+	fmt.Printf("Removed %s (%s)\n", info.Filename, humanSize(info.SizeBytes))
 	return nil
 }
 
