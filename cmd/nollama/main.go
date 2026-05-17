@@ -20,6 +20,7 @@ import (
 	"github.com/hirdforge/nollama/internal/hardware"
 	"github.com/hirdforge/nollama/internal/model"
 	"github.com/hirdforge/nollama/internal/process"
+	runtimemgr "github.com/hirdforge/nollama/internal/runtime"
 	"github.com/hirdforge/nollama/internal/version"
 	"github.com/spf13/cobra"
 )
@@ -248,11 +249,15 @@ var cpCmd = &cobra.Command{
 // runLoad handles the load command — parses GGUF, detects hardware, computes flags.
 func runLoad(cmd *cobra.Command, args []string) error {
 	modelPath := args[0]
+	cfg, err := loadCLIConfig()
+	if err != nil {
+		return err
+	}
 
 	if client, err := resolveNodeClient(cmd); err != nil {
 		return err
 	} else if client != nil {
-		req, err := buildRemoteLoadRequest(cmd, modelPath)
+		req, appliedProfiles, warnings, err := buildRemoteLoadRequest(cmd, modelPath, cfg)
 		if err != nil {
 			return err
 		}
@@ -262,13 +267,19 @@ func runLoad(cmd *cobra.Command, args []string) error {
 		}
 
 		nodeName, _ := cmd.Flags().GetString("node")
+		for _, warning := range warnings {
+			fmt.Fprintf(os.Stderr, "WARNING: %s\n", warning)
+		}
+		if len(appliedProfiles) > 0 {
+			fmt.Printf("Applied profiles: %s\n", strings.Join(appliedProfiles, ", "))
+		}
 		fmt.Printf("Loaded model %s on %s (port %d, PID %d, device %s)\n",
 			resp.Model, nodeName, resp.Port, resp.PID, resp.Device)
 		return nil
 	}
 
 	// Resolve llama-server path
-	llamaServerFlag, err := resolveLlamaServerPath(cmd, nil)
+	llamaServerFlag, err := resolveLlamaServerPath(cmd, cfg)
 	if err != nil {
 		return err
 	}
@@ -308,10 +319,27 @@ func runLoad(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("flag computation failed: %w", err)
 	}
 
+	overlayFlags, appliedProfiles, warnings, err := resolveLoadOverlay(cmd, cfg)
+	if err != nil {
+		return err
+	}
+	result.Flags = process.MergePassthroughFlags(result.Flags, flagsMapToSlice(overlayFlags))
+	result.Command = buildCommand(llamaServerFlag, result.Flags)
+
 	if dryRun {
 		fmt.Println()
 		fmt.Println("=== Dry Run: Computed llama-server command ===")
 		fmt.Println()
+
+		if len(appliedProfiles) > 0 {
+			fmt.Printf("Profiles:   %s\n", strings.Join(appliedProfiles, ", "))
+		}
+		for _, warning := range warnings {
+			fmt.Printf("WARNING:    %s\n", warning)
+		}
+		if len(appliedProfiles) > 0 || len(warnings) > 0 {
+			fmt.Println()
+		}
 
 		// Device selection reasoning
 		fileSizeMB := uint64(meta.FileSizeBytes) / 1024 / 1024
@@ -381,6 +409,12 @@ func runLoad(cmd *cobra.Command, args []string) error {
 		fmt.Println()
 		fmt.Printf("Passthrough flags: %v\n", passthrough)
 		fmt.Printf("Merged flags: %v\n", mergedFlags)
+	}
+	if len(appliedProfiles) > 0 {
+		fmt.Printf("Applied profiles: %s\n", strings.Join(appliedProfiles, ", "))
+	}
+	for _, warning := range warnings {
+		fmt.Fprintf(os.Stderr, "WARNING: %s\n", warning)
 	}
 
 	fmt.Println()
@@ -683,25 +717,30 @@ func sortedRemoteNames(remotes map[string]string) []string {
 	return names
 }
 
-func buildRemoteLoadRequest(cmd *cobra.Command, modelPath string) (federation.LoadRequest, error) {
+func buildRemoteLoadRequest(cmd *cobra.Command, modelPath string, cfg *config.Config) (federation.LoadRequest, []string, []string, error) {
 	gpu, err := cmd.Flags().GetInt("gpu")
 	if err != nil {
-		return federation.LoadRequest{}, err
+		return federation.LoadRequest{}, nil, nil, err
 	}
 	cpu, err := cmd.Flags().GetBool("cpu")
 	if err != nil {
-		return federation.LoadRequest{}, err
+		return federation.LoadRequest{}, nil, nil, err
+	}
+	overlayFlags, appliedProfiles, warnings, err := resolveLoadOverlay(cmd, cfg)
+	if err != nil {
+		return federation.LoadRequest{}, nil, nil, err
 	}
 
 	req := federation.LoadRequest{
 		Model: filepath.Base(modelPath),
 		CPU:   cpu,
+		Flags: overlayFlags,
 	}
 	if !cpu && gpu >= 0 {
 		req.GPU = &gpu
 	}
 
-	return req, nil
+	return req, appliedProfiles, warnings, nil
 }
 
 func resolveNodeClient(cmd *cobra.Command) (*federation.Client, error) {
@@ -819,7 +858,7 @@ func init() {
 	loadCmd.Flags().Int("gpu", -1, "GPU index to load on")
 	loadCmd.Flags().Bool("cpu", false, "Force CPU inference")
 	loadCmd.Flags().String("runtime", "", "Use a specific llama-server runtime")
-	loadCmd.Flags().String("profile", "", "Apply a hardware profile")
+	loadCmd.Flags().StringSlice("profile", nil, "Apply one or more hardware profiles")
 	loadCmd.Flags().Bool("dry-run", false, "Show what would be passed to llama-server")
 	loadCmd.Flags().Bool("swap", false, "Evict LRU model if VRAM is full")
 	loadCmd.Flags().StringArray("passthrough", []string{}, "Extra llama-server flags to append (can be used multiple times)")
@@ -829,4 +868,99 @@ func init() {
 
 	// cp flags
 	cpCmd.Flags().String("to", "", "Target node for copy")
+}
+
+func loadCLIConfig() (*config.Config, error) {
+	cfgPath := config.FindConfig()
+	if cfgPath == "" {
+		return config.DefaultConfig(), nil
+	}
+	return config.Load(cfgPath)
+}
+
+func resolveLoadOverlay(cmd *cobra.Command, cfg *config.Config) (map[string]interface{}, []string, []string, error) {
+	if cfg == nil {
+		cfg = config.DefaultConfig()
+	}
+
+	merged := make(map[string]interface{}, len(cfg.Defaults))
+	for k, v := range cfg.Defaults {
+		merged[k] = v
+	}
+
+	profileNames, err := cmd.Flags().GetStringSlice("profile")
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	profileNames = compactStrings(profileNames)
+	if len(profileNames) == 0 {
+		return merged, nil, nil, nil
+	}
+
+	loaded := make([]config.Profile, 0, len(profileNames))
+	for _, name := range profileNames {
+		profile, err := config.LoadProfile(name)
+		if err != nil {
+			return nil, nil, nil, err
+		}
+		loaded = append(loaded, profile)
+	}
+
+	mergedProfiles := config.MergeProfiles(loaded)
+	for k, v := range mergedProfiles.Flags {
+		merged[k] = v
+	}
+
+	activeRuntime, err := runtimemgr.NewManager().ActiveName()
+	if err != nil {
+		activeRuntime = ""
+	}
+
+	return merged, profileNames, config.ProfileRuntimeWarnings(mergedProfiles.Requires, activeRuntime), nil
+}
+
+func compactStrings(values []string) []string {
+	out := make([]string, 0, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value != "" {
+			out = append(out, value)
+		}
+	}
+	return out
+}
+
+func flagsMapToSlice(flags map[string]interface{}) []string {
+	if len(flags) == 0 {
+		return nil
+	}
+
+	keys := make([]string, 0, len(flags))
+	for key := range flags {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+
+	var result []string
+	for _, key := range keys {
+		flag := "--" + key
+		switch val := flags[key].(type) {
+		case bool:
+			if val {
+				result = append(result, flag)
+			}
+		case string:
+			result = append(result, flag, val)
+		default:
+			result = append(result, flag, fmt.Sprintf("%v", val))
+		}
+	}
+	return result
+}
+
+func buildCommand(binary string, flags []string) string {
+	parts := make([]string, 0, len(flags)+1)
+	parts = append(parts, binary)
+	parts = append(parts, flags...)
+	return strings.Join(parts, " ")
 }

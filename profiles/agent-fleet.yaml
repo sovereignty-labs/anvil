@@ -1,0 +1,7 @@
+name: agent-fleet
+description: "Maximum concurrent slots for agent swarms. Smaller context per slot, more slots."
+flags:
+  parallel: 8
+  ctx-size: 32768
+  flash-attn: "on"
+  no-warmup: true

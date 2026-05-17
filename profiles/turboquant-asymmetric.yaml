@@ -1,0 +1,8 @@
+name: turboquant-asymmetric
+description: "Asymmetric TurboQuant — Q8 on K cache, turbo3 on V cache. Maintains needle-in-haystack at 131K+. Requires TheTom's fork."
+requires:
+  runtime: turboquant
+flags:
+  cache-type-k: q8_0
+  cache-type-v: turbo3
+  flash-attn: "on"

@@ -38,6 +38,9 @@ autoload:
   - model: gemma-4-26B-A4B-Q3_K_XL.gguf
     gpu: 0
     runtime: turboquant
+    profiles:
+      - turboquant-asymmetric
+      - agent-fleet
     flags:
       ctx-size: 131072
       parallel: 8
@@ -97,6 +100,9 @@ defaults:
 	}
 	if entry0.Runtime != "turboquant" {
 		t.Errorf("autoload[0].runtime: got %s", entry0.Runtime)
+	}
+	if len(entry0.Profiles) != 2 {
+		t.Fatalf("expected 2 autoload profiles, got %d", len(entry0.Profiles))
 	}
 
 	entry1 := cfg.Autoload[1]

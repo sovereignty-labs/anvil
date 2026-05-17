@@ -20,6 +20,7 @@ type statusRow struct {
 	Node   string
 	GPU    string
 	Model  string
+	Alias  string
 	VRAM   string
 	Port   string
 	PID    string
@@ -130,6 +131,7 @@ func renderFleetStatus(results []nodeStatusResult) {
 				Node:   result.Name,
 				GPU:    "offline",
 				Model:  "—",
+				Alias:  "—",
 				VRAM:   "—",
 				Port:   "—",
 				PID:    "—",
@@ -159,10 +161,10 @@ func renderStatusRows(rows []statusRow) {
 	}
 
 	w := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
-	fmt.Fprintln(w, "NODE\tGPU\tMODEL\tVRAM\tPORT\tPID\tUPTIME")
+	fmt.Fprintln(w, "NODE\tGPU\tMODEL\tALIAS\tVRAM\tPORT\tPID\tUPTIME")
 	for _, row := range rows {
-		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
-			row.Node, row.GPU, row.Model, row.VRAM, row.Port, row.PID, row.Uptime)
+		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
+			row.Node, row.GPU, row.Model, row.Alias, row.VRAM, row.Port, row.PID, row.Uptime)
 	}
 	_ = w.Flush()
 }
@@ -174,6 +176,7 @@ func buildStatusRows(nodeName string, resp *federation.StatusResponse) []statusR
 			Node:   nodeName,
 			GPU:    modelGPUName(resp.Node, model.GPU),
 			Model:  model.Name,
+			Alias:  statusAlias(model.Alias),
 			VRAM:   modelVRAM(resp.Node, model.GPU),
 			Port:   fmt.Sprintf("%d", model.Port),
 			PID:    fmt.Sprintf("%d", model.PID),
@@ -218,6 +221,14 @@ func modelVRAM(node federation.StatusNode, gpu string) string {
 
 func mbToGB(mb uint64) float64 {
 	return float64(mb) / 1024
+}
+
+func statusAlias(alias string) string {
+	alias = strings.TrimSpace(alias)
+	if alias == "" {
+		return "—"
+	}
+	return alias
 }
 
 func processFormatDuration(d time.Duration) string {

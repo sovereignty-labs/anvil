@@ -29,6 +29,7 @@ type StatusResponse = NodeStatus
 // StatusModel mirrors internal/server.statusModel.
 type StatusModel struct {
 	Name          string `json:"name"`
+	Alias         string `json:"alias,omitempty"`
 	Port          int    `json:"port"`
 	GPU           string `json:"gpu"`
 	PID           int    `json:"pid"`
