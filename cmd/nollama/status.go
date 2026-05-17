@@ -205,7 +205,11 @@ func modelVRAM(node federation.StatusNode, gpu string) string {
 	if idx, ok := parseCUDAIndex(gpu); ok {
 		for _, g := range node.GPUs {
 			if g.Index == idx {
-				return fmt.Sprintf("%.1f/%.1fGB", mbToGB(g.VRAMFreeMB), mbToGB(g.VRAMTotalMB))
+				used := g.VRAMTotalMB
+				if g.VRAMTotalMB > g.VRAMFreeMB {
+					used = g.VRAMTotalMB - g.VRAMFreeMB
+				}
+				return fmt.Sprintf("%.1f/%.1fGB", mbToGB(used), mbToGB(g.VRAMTotalMB))
 			}
 		}
 	}

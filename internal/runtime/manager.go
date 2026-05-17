@@ -14,6 +14,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/hirdforge/nollama/internal/config"
 )
 
 const (
@@ -46,10 +48,63 @@ func NewManager() *Manager {
 }
 
 func defaultRuntimesDir() string {
+	if dir := configuredRuntimesDir(); dir != "" {
+		return dir
+	}
+
+	varLib := filepath.Join("/var/lib", "nollama", DefaultRuntimesDir)
+	home := homeRuntimesDir()
+
+	if runtimeDirHasEntries(varLib) {
+		return varLib
+	}
+	if runtimeDirHasEntries(home) {
+		return home
+	}
+	if _, err := os.Stat(varLib); err == nil {
+		return varLib
+	}
+	if home != "" {
+		return home
+	}
+	return filepath.Join(os.TempDir(), "nollama", DefaultRuntimesDir)
+}
+
+func configuredRuntimesDir() string {
+	cfgPath := config.FindConfig()
+	if cfgPath == "" {
+		return ""
+	}
+	cfg, err := config.Load(cfgPath)
+	if err != nil || cfg == nil || strings.TrimSpace(cfg.RuntimesDir) == "" {
+		return ""
+	}
+	dir := strings.TrimSpace(cfg.RuntimesDir)
+	if !filepath.IsAbs(dir) {
+		abs, err := filepath.Abs(dir)
+		if err == nil {
+			dir = abs
+		}
+	}
+	return dir
+}
+
+func homeRuntimesDir() string {
 	if home, err := os.UserHomeDir(); err == nil && home != "" {
 		return filepath.Join(home, ".local", "share", "nollama", DefaultRuntimesDir)
 	}
-	return filepath.Join(os.TempDir(), "nollama", DefaultRuntimesDir)
+	return ""
+}
+
+func runtimeDirHasEntries(dir string) bool {
+	if dir == "" {
+		return false
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return false
+	}
+	return len(entries) > 0
 }
 
 func (m *Manager) ensureDir() error {

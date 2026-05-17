@@ -19,6 +19,14 @@ import (
 	mcpkit "github.com/mark3labs/mcp-go/mcp"
 )
 
+type modelDisplay struct {
+	Name    string
+	Size    string
+	Arch    string
+	Quant   string
+	Context string
+}
+
 func (r *Runner) registerTools() {
 	r.server.AddTool(mcpkit.NewTool("nollama_status",
 		mcpkit.WithDescription("Fleet overview across local and remote nodes"),
@@ -151,9 +159,51 @@ func (r *Runner) toolUnload(ctx context.Context, req mcpkit.CallToolRequest) (*m
 	return mcpkit.NewToolResultText(fmt.Sprintf("Unloaded model %s on %s", filepath.Base(modelName), target)), nil
 }
 
-func (r *Runner) toolModels(ctx context.Context, req mcpkit.CallToolRequest) (*mcpkit.CallToolResult, error) {
+func (r *Runner) toolModels(ctx context.Context, req mcpkit.CallToolRequest) (res *mcpkit.CallToolResult, err error) {
+	defer func() {
+		if rec := recover(); rec != nil {
+			res = mcpkit.NewToolResultError(fmt.Sprintf("nollama_models panicked: %v", rec))
+			err = nil
+		}
+	}()
+
 	node := strings.TrimSpace(argString(req.GetArguments(), "node"))
-	client, err := r.clientForNode(node)
+	if node != "" {
+		client, err := r.clientForNode(node)
+		if err != nil {
+			return mcpkit.NewToolResultError(err.Error()), nil
+		}
+		resp, err := client.Models()
+		if err != nil {
+			return mcpkit.NewToolResultError(err.Error()), nil
+		}
+		if len(resp.Models) == 0 {
+			return mcpkit.NewToolResultText(fmt.Sprintf("No GGUF models found on %s", node)), nil
+		}
+		rows := make([]modelDisplay, 0, len(resp.Models))
+		for _, m := range resp.Models {
+			row := modelDisplay{
+				Name:    strings.TrimSuffix(m.Name, ".gguf"),
+				Size:    m.SizeHuman,
+				Arch:    "-",
+				Quant:   "-",
+				Context: "-",
+			}
+			if m.Arch != "" {
+				row.Arch = m.Arch
+			}
+			if m.Quant != "" {
+				row.Quant = m.Quant
+			}
+			if m.ContextLength > 0 {
+				row.Context = formatContextLength(m.ContextLength)
+			}
+			rows = append(rows, row)
+		}
+		return mcpkit.NewToolResultText(renderModelRows(rows)), nil
+	}
+
+	client, err := r.clientForNode("")
 	if err != nil {
 		return mcpkit.NewToolResultError(err.Error()), nil
 	}
@@ -162,33 +212,30 @@ func (r *Runner) toolModels(ctx context.Context, req mcpkit.CallToolRequest) (*m
 		return mcpkit.NewToolResultError(err.Error()), nil
 	}
 	if len(resp.Models) == 0 {
-		target := "local"
-		if node != "" {
-			target = node
-		}
-		return mcpkit.NewToolResultText(fmt.Sprintf("No GGUF models found on %s", target)), nil
+		return mcpkit.NewToolResultText(fmt.Sprintf("No GGUF models found in %s", r.cfg.ModelDir)), nil
 	}
-	var b strings.Builder
-	w := tabwriter.NewWriter(&b, 0, 4, 2, ' ', 0)
-	fmt.Fprintln(w, "MODEL\tSIZE\tARCH\tQUANT\tCONTEXT")
+
+	rows := make([]modelDisplay, 0, len(resp.Models))
 	for _, m := range resp.Models {
-		name := strings.TrimSuffix(m.Name, ".gguf")
-		arch := m.Arch
-		if arch == "" {
-			arch = "-"
+		row := modelDisplay{
+			Name:    strings.TrimSuffix(m.Name, ".gguf"),
+			Size:    m.SizeHuman,
+			Arch:    "-",
+			Quant:   "-",
+			Context: "-",
 		}
-		quant := m.Quant
-		if quant == "" {
-			quant = "-"
+		if m.Arch != "" {
+			row.Arch = m.Arch
 		}
-		ctxLen := "-"
+		if m.Quant != "" {
+			row.Quant = m.Quant
+		}
 		if m.ContextLength > 0 {
-			ctxLen = formatContextLength(m.ContextLength)
+			row.Context = formatContextLength(m.ContextLength)
 		}
-		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n", name, m.SizeHuman, arch, quant, ctxLen)
+		rows = append(rows, row)
 	}
-	_ = w.Flush()
-	return mcpkit.NewToolResultText(b.String()), nil
+	return mcpkit.NewToolResultText(renderModelRows(rows)), nil
 }
 
 func (r *Runner) toolPull(ctx context.Context, req mcpkit.CallToolRequest) (*mcpkit.CallToolResult, error) {
@@ -213,7 +260,14 @@ func (r *Runner) toolPull(ctx context.Context, req mcpkit.CallToolRequest) (*mcp
 	return mcpkit.NewToolResultText(fmt.Sprintf("Pulled %s on %s (%s)", resp.Filename, target, humanBytes(resp.Size))), nil
 }
 
-func (r *Runner) toolInspect(ctx context.Context, req mcpkit.CallToolRequest) (*mcpkit.CallToolResult, error) {
+func (r *Runner) toolInspect(ctx context.Context, req mcpkit.CallToolRequest) (res *mcpkit.CallToolResult, err error) {
+	defer func() {
+		if rec := recover(); rec != nil {
+			res = mcpkit.NewToolResultError(fmt.Sprintf("nollama_inspect panicked: %v", rec))
+			err = nil
+		}
+	}()
+
 	modelName := strings.TrimSpace(argString(req.GetArguments(), "model"))
 	if modelName == "" {
 		return mcpkit.NewToolResultError("model is required"), nil
@@ -433,12 +487,27 @@ func renderFleetStatus(results map[string]statusResult) string {
 	return b.String()
 }
 
+func renderModelRows(rows []modelDisplay) string {
+	var b strings.Builder
+	w := tabwriter.NewWriter(&b, 0, 4, 2, ' ', 0)
+	fmt.Fprintln(w, "MODEL\tSIZE\tARCH\tQUANT\tCONTEXT")
+	for _, row := range rows {
+		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n", row.Name, row.Size, row.Arch, row.Quant, row.Context)
+	}
+	_ = w.Flush()
+	return b.String()
+}
+
 func formatVRAM(gpus []federation.StatusGPU) string {
 	if len(gpus) == 0 {
 		return "-"
 	}
 	gpu := gpus[0]
-	return fmt.Sprintf("%.1f/%.1fGB", float64(gpu.VRAMFreeMB)/1024.0, float64(gpu.VRAMTotalMB)/1024.0)
+	used := gpu.VRAMTotalMB
+	if gpu.VRAMTotalMB > gpu.VRAMFreeMB {
+		used = gpu.VRAMTotalMB - gpu.VRAMFreeMB
+	}
+	return fmt.Sprintf("%.1f/%.1fGB", float64(used)/1024.0, float64(gpu.VRAMTotalMB)/1024.0)
 }
 
 func formatUptime(seconds int64) string {
@@ -558,4 +627,21 @@ func (r *Runner) resolveModelPath(name string) (string, error) {
 		return "", fmt.Errorf("model %q not found in %s", name, dir)
 	}
 	return byName[match].Path, nil
+}
+
+func resolveLocalModelDir(cfg *config.Config) (string, error) {
+	if cfg != nil && cfg.ModelDir != "" {
+		return cfg.ModelDir, nil
+	}
+	cfgPath := config.FindConfig()
+	if cfgPath != "" {
+		loaded, err := config.Load(cfgPath)
+		if err != nil {
+			return "", err
+		}
+		if loaded.ModelDir != "" {
+			return loaded.ModelDir, nil
+		}
+	}
+	return config.DefaultConfig().ModelDir, nil
 }

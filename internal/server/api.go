@@ -420,7 +420,7 @@ func (s *Server) handleModels(w http.ResponseWriter, r *http.Request) {
 		}
 		if m.Meta != nil {
 			sum.Arch = m.Meta.Architecture
-			sum.Quant = m.Meta.QuantName
+			sum.Quant = m.Meta.QuantDisplayName(m.Filename)
 			sum.ContextLength = m.Meta.ContextLength
 		}
 		resp.Models = append(resp.Models, sum)
