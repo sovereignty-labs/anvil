@@ -159,14 +159,7 @@ func (r *Runner) toolUnload(ctx context.Context, req mcpkit.CallToolRequest) (*m
 	return mcpkit.NewToolResultText(fmt.Sprintf("Unloaded model %s on %s", filepath.Base(modelName), target)), nil
 }
 
-func (r *Runner) toolModels(ctx context.Context, req mcpkit.CallToolRequest) (res *mcpkit.CallToolResult, err error) {
-	defer func() {
-		if rec := recover(); rec != nil {
-			res = mcpkit.NewToolResultError(fmt.Sprintf("nollama_models panicked: %v", rec))
-			err = nil
-		}
-	}()
-
+func (r *Runner) toolModels(ctx context.Context, req mcpkit.CallToolRequest) (*mcpkit.CallToolResult, error) {
 	node := strings.TrimSpace(argString(req.GetArguments(), "node"))
 	if node != "" {
 		client, err := r.clientForNode(node)
@@ -262,14 +255,7 @@ func (r *Runner) toolPull(ctx context.Context, req mcpkit.CallToolRequest) (*mcp
 	return mcpkit.NewToolResultText(fmt.Sprintf("Pulled %s on %s (%s)", resp.Filename, target, humanBytes(resp.Size))), nil
 }
 
-func (r *Runner) toolInspect(ctx context.Context, req mcpkit.CallToolRequest) (res *mcpkit.CallToolResult, err error) {
-	defer func() {
-		if rec := recover(); rec != nil {
-			res = mcpkit.NewToolResultError(fmt.Sprintf("nollama_inspect panicked: %v", rec))
-			err = nil
-		}
-	}()
-
+func (r *Runner) toolInspect(ctx context.Context, req mcpkit.CallToolRequest) (*mcpkit.CallToolResult, error) {
 	modelName := strings.TrimSpace(argString(req.GetArguments(), "model"))
 	if modelName == "" {
 		return mcpkit.NewToolResultError("model is required"), nil
