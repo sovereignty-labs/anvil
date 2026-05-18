@@ -112,6 +112,54 @@ func TestLoadDuplicateModelReturnsConflict(t *testing.T) {
 	}
 }
 
+func TestLoadDuplicateModelDifferentAliasAllowed(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "qwen.gguf"), []byte("not a real gguf"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := config.DefaultConfig()
+	cfg.ModelDir = dir
+	srv := NewServer(cfg, "", nil)
+
+	// First instance already loaded under alias agent-fleet.
+	srv.proxy.AddRouteWithAlias("qwen.gguf", 8001, "agent-fleet")
+
+	// Second load with a different alias should NOT 409 on the duplicate guard.
+	// (It will still fail downstream because ParseGGUF rejects the fake bytes,
+	// but it must clear the HasRouteWithAlias check first.)
+	body := bytes.NewBufferString(`{"model":"qwen.gguf","alias":"agent-single"}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/load", body)
+	rr := httptest.NewRecorder()
+	srv.handleLoad(rr, req)
+
+	if rr.Code == http.StatusConflict {
+		t.Fatalf("expected dup-load guard to pass for different alias, got 409: %s", rr.Body.String())
+	}
+}
+
+func TestLoadDuplicateModelSameAliasRejected(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "qwen.gguf"), []byte("not a real gguf"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := config.DefaultConfig()
+	cfg.ModelDir = dir
+	srv := NewServer(cfg, "", nil)
+
+	srv.proxy.AddRouteWithAlias("qwen.gguf", 8001, "agent-fleet")
+
+	body := bytes.NewBufferString(`{"model":"qwen.gguf","alias":"agent-fleet"}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/load", body)
+	rr := httptest.NewRecorder()
+	srv.handleLoad(rr, req)
+
+	if rr.Code != http.StatusConflict {
+		t.Fatalf("expected 409 for same-alias duplicate, got %d: %s", rr.Code, rr.Body.String())
+	}
+}
+
 func TestHandleLoadBadMethod(t *testing.T) {
 	cfg := config.DefaultConfig()
 	srv := NewServer(cfg, "", nil)

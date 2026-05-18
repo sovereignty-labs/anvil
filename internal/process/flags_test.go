@@ -666,3 +666,51 @@ func TestComputeFlags_AbsolutePath_EnvVar(t *testing.T) {
 		t.Error("expected non-empty command")
 	}
 }
+
+func TestOverrideResultPort(t *testing.T) {
+	r := &Result{
+		Port:  11434,
+		Flags: []string{"--model", "/x.gguf", "--host", "0.0.0.0", "--port", "11434"},
+	}
+	OverrideResultPort(r, 8002)
+	if r.Port != 8002 {
+		t.Errorf("Port = %d, want 8002", r.Port)
+	}
+	for i, f := range r.Flags {
+		if f == "--port" {
+			if r.Flags[i+1] != "8002" {
+				t.Errorf("--port flag = %s, want 8002", r.Flags[i+1])
+			}
+			return
+		}
+	}
+	t.Error("--port flag missing from result.Flags")
+}
+
+func TestOverrideResultPortNoOpOnZero(t *testing.T) {
+	r := &Result{
+		Port:  11434,
+		Flags: []string{"--port", "11434"},
+	}
+	OverrideResultPort(r, 0)
+	if r.Port != 11434 || r.Flags[1] != "11434" {
+		t.Error("zero port should be no-op")
+	}
+}
+
+func TestOverrideResultPortAppendsWhenMissing(t *testing.T) {
+	r := &Result{Port: 0, Flags: []string{"--model", "/x.gguf"}}
+	OverrideResultPort(r, 9090)
+	if r.Port != 9090 {
+		t.Errorf("Port = %d, want 9090", r.Port)
+	}
+	found := false
+	for i, f := range r.Flags {
+		if f == "--port" && i+1 < len(r.Flags) && r.Flags[i+1] == "9090" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected --port 9090 to be appended, got %v", r.Flags)
+	}
+}

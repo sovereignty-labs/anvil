@@ -77,5 +77,7 @@ func newLoadTestCommand(t *testing.T) *cobra.Command {
 	cmd.Flags().Int("gpu", -1, "")
 	cmd.Flags().Bool("cpu", false, "")
 	cmd.Flags().Bool("swap", false, "")
+	cmd.Flags().Int("port", 0, "")
+	cmd.Flags().String("alias", "", "")
 	return cmd
 }

@@ -19,7 +19,17 @@ import (
 
 // Route maps a model name to a llama-server backend.
 type Route struct {
-	// ModelName is the GGUF filename (without .gguf extension).
+	// RouteKey is the lookup key in the proxy's routes map. It is the lowercased
+	// alias if Alias is set, otherwise the lowercased filename stem.
+	RouteKey string
+
+	// Alias is the optional per-instance route key. Empty when the route was
+	// registered without an alias (key is the filename stem).
+	Alias string
+
+	// ModelName is the GGUF filename (kept verbatim for display / process
+	// management). Multiple routes may share the same ModelName when they
+	// differ by alias.
 	ModelName string
 
 	// BackendURL is the llama-server endpoint (e.g. http://127.0.0.1:11435).
@@ -39,6 +49,15 @@ type Route struct {
 	RequestCount int64
 }
 
+// routeKeyFor returns the proxy map key for a given model filename + optional
+// alias. Alias takes precedence; otherwise the filename stem is used.
+func routeKeyFor(modelFilename, alias string) string {
+	if alias = strings.TrimSpace(alias); alias != "" {
+		return strings.ToLower(alias)
+	}
+	return strings.ToLower(strings.TrimSuffix(modelFilename, ".gguf"))
+}
+
 // IdleRoute describes a route that has exceeded the idle threshold.
 type IdleRoute struct {
 	ModelName string
@@ -49,6 +68,8 @@ type IdleRoute struct {
 
 // RouteStats is a snapshot of a route for metrics exposition.
 type RouteStats struct {
+	RouteKey     string
+	Alias        string
 	ModelName    string
 	Port         int
 	LastRequest  time.Time
@@ -79,13 +100,25 @@ func NewProxy(logger *slog.Logger) *Proxy {
 	}
 }
 
-// AddRoute registers a model → backend mapping.
+// AddRoute registers a model → backend mapping keyed on the filename stem.
+// For alias-keyed routes (per-instance routing), call AddRouteWithAlias.
 func (p *Proxy) AddRoute(modelFilename string, port int) {
-	stem := strings.ToLower(strings.TrimSuffix(modelFilename, ".gguf"))
+	p.AddRouteWithAlias(modelFilename, port, "")
+}
+
+// AddRouteWithAlias registers a model → backend mapping. When alias is non-empty
+// the proxy keys the route on the lowercased alias; otherwise on the filename
+// stem. The same model file may be registered multiple times with different
+// aliases — each becomes an independent route.
+func (p *Proxy) AddRouteWithAlias(modelFilename string, port int, alias string) {
+	alias = strings.TrimSpace(alias)
+	key := routeKeyFor(modelFilename, alias)
 	backend, _ := url.Parse(fmt.Sprintf("http://127.0.0.1:%d", port))
 
 	now := time.Now()
 	route := &Route{
+		RouteKey:    key,
+		Alias:       alias,
 		ModelName:   modelFilename,
 		BackendURL:  backend,
 		Port:        port,
@@ -95,25 +128,52 @@ func (p *Proxy) AddRoute(modelFilename string, port int) {
 
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	p.routes[stem] = route
+	p.routes[key] = route
 	p.rebuildAllLocked()
-	p.logger.Info("route added", "model", modelFilename, "port", port)
+	p.logger.Info("route added", "model", modelFilename, "alias", alias, "port", port)
 }
 
-// RemoveRoute removes a model's routing entry. Returns true if a route was found
-// and removed, false otherwise.
-func (p *Proxy) RemoveRoute(modelFilename string) bool {
-	stem := strings.ToLower(strings.TrimSuffix(modelFilename, ".gguf"))
-
+// RemoveRoute removes a routing entry by route key (alias if registered with
+// one, otherwise filename stem). Returns true if a route was found and removed.
+// Callers without a precise key should prefer RemoveRouteByPort.
+func (p *Proxy) RemoveRoute(modelFilenameOrAlias string) bool {
+	key := routeKeyFor(modelFilenameOrAlias, "")
+	// Try direct lookup first (works when caller passes an alias or filename stem).
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	if _, ok := p.routes[stem]; !ok {
-		return false
+	if _, ok := p.routes[key]; ok {
+		delete(p.routes, key)
+		p.rebuildAllLocked()
+		p.logger.Info("route removed", "key", key)
+		return true
 	}
-	delete(p.routes, stem)
-	p.rebuildAllLocked()
-	p.logger.Info("route removed", "model", modelFilename)
-	return true
+	// Fall back: caller passed the raw alias.
+	altKey := strings.ToLower(strings.TrimSpace(modelFilenameOrAlias))
+	if altKey != key {
+		if _, ok := p.routes[altKey]; ok {
+			delete(p.routes, altKey)
+			p.rebuildAllLocked()
+			p.logger.Info("route removed", "key", altKey)
+			return true
+		}
+	}
+	return false
+}
+
+// RemoveRouteByPort removes the route serving the given port. Useful for
+// callers that only know the backend port (unload by port, idle reap, swap).
+func (p *Proxy) RemoveRouteByPort(port int) bool {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	for key, r := range p.routes {
+		if r.Port == port {
+			delete(p.routes, key)
+			p.rebuildAllLocked()
+			p.logger.Info("route removed", "key", key, "port", port)
+			return true
+		}
+	}
+	return false
 }
 
 // SetAliases updates the alias map.
@@ -127,11 +187,19 @@ func (p *Proxy) SetAliases(aliases map[string]string) {
 }
 
 // HasRoute reports whether a route exists for the given model filename.
+// Equivalent to HasRouteWithAlias(modelFilename, "").
 func (p *Proxy) HasRoute(modelFilename string) bool {
-	stem := strings.ToLower(strings.TrimSuffix(modelFilename, ".gguf"))
+	return p.HasRouteWithAlias(modelFilename, "")
+}
+
+// HasRouteWithAlias reports whether a route exists keyed on the alias (when
+// non-empty) or the filename stem (otherwise). Used by the duplicate-load
+// guard so two loads of the same file under different aliases coexist.
+func (p *Proxy) HasRouteWithAlias(modelFilename, alias string) bool {
+	key := routeKeyFor(modelFilename, alias)
 	p.mu.RLock()
 	defer p.mu.RUnlock()
-	_, ok := p.routes[stem]
+	_, ok := p.routes[key]
 	return ok
 }
 
@@ -203,6 +271,8 @@ func (p *Proxy) RouteStatsList() []RouteStats {
 	stats := make([]RouteStats, 0, len(p.all))
 	for _, r := range p.all {
 		stats = append(stats, RouteStats{
+			RouteKey:     r.RouteKey,
+			Alias:        r.Alias,
 			ModelName:    r.ModelName,
 			Port:         r.Port,
 			LastRequest:  r.LastRequest,

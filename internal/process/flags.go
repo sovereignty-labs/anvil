@@ -22,6 +22,23 @@ type Result struct {
 	Port           int      // llama-server HTTP port (11434 + modelIndex)
 }
 
+// OverrideResultPort rewrites the port baked into a ComputeFlags result so the
+// process is spawned on a pinned port. No-op when port <= 0. Updates both the
+// Result.Port field and the --port value inside Result.Flags.
+func OverrideResultPort(result *Result, port int) {
+	if result == nil || port <= 0 {
+		return
+	}
+	result.Port = port
+	for i := 0; i < len(result.Flags); i++ {
+		if result.Flags[i] == "--port" && i+1 < len(result.Flags) {
+			result.Flags[i+1] = fmt.Sprintf("%d", port)
+			return
+		}
+	}
+	result.Flags = append(result.Flags, "--port", fmt.Sprintf("%d", port))
+}
+
 // ComputeFlags takes a GGUF model (with its path), hardware inventory and returns the
 // optimal llama-server flags for loading the model.
 func ComputeFlags(meta *model.GGUFMetadata, modelPath string, inv *hardware.Inventory, llamaServerPath string, modelIndex int) (*Result, error) {

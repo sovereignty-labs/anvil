@@ -336,6 +336,113 @@ func TestProxyRequestTrackingUpdates(t *testing.T) {
 	}
 }
 
+func TestAddRouteWithAlias(t *testing.T) {
+	p := NewProxy(nil)
+	p.AddRouteWithAlias("qwen3.6-35B-A3B.gguf", 8001, "agent-fleet")
+
+	if !p.HasRouteWithAlias("qwen3.6-35B-A3B.gguf", "agent-fleet") {
+		t.Error("expected route keyed on alias to be present")
+	}
+	// Filename-stem lookup should miss (the route is alias-keyed).
+	if p.HasRoute("qwen3.6-35B-A3B.gguf") {
+		t.Error("alias-keyed route should not be discoverable by filename stem")
+	}
+}
+
+func TestDuplicateModelDifferentAlias(t *testing.T) {
+	p := NewProxy(nil)
+	p.AddRouteWithAlias("qwen.gguf", 8001, "agent-fleet")
+	p.AddRouteWithAlias("qwen.gguf", 8002, "agent-single")
+
+	if p.RouteCount() != 2 {
+		t.Errorf("expected 2 routes, got %d", p.RouteCount())
+	}
+	if !p.HasRouteWithAlias("qwen.gguf", "agent-fleet") {
+		t.Error("missing agent-fleet route")
+	}
+	if !p.HasRouteWithAlias("qwen.gguf", "agent-single") {
+		t.Error("missing agent-single route")
+	}
+}
+
+func TestDuplicateModelSameAliasCollides(t *testing.T) {
+	p := NewProxy(nil)
+	p.AddRouteWithAlias("qwen.gguf", 8001, "agent-fleet")
+
+	if !p.HasRouteWithAlias("qwen.gguf", "agent-fleet") {
+		t.Fatal("setup: first route missing")
+	}
+	// HasRoute with the same alias must fire — this is the dup-load guard.
+	if !p.HasRouteWithAlias("qwen.gguf", "agent-fleet") {
+		t.Error("HasRouteWithAlias should detect collision on same alias")
+	}
+}
+
+func TestDuplicateModelNoAliasCollides(t *testing.T) {
+	p := NewProxy(nil)
+	p.AddRoute("qwen.gguf", 8001)
+
+	if !p.HasRoute("qwen.gguf") {
+		t.Error("filename-keyed dup-load guard should fire")
+	}
+}
+
+func TestRemoveRouteByAlias(t *testing.T) {
+	p := NewProxy(nil)
+	p.AddRouteWithAlias("qwen.gguf", 8001, "agent-fleet")
+	p.AddRouteWithAlias("qwen.gguf", 8002, "agent-single")
+
+	if !p.RemoveRoute("agent-fleet") {
+		t.Error("RemoveRoute by alias key should succeed")
+	}
+	if p.HasRouteWithAlias("qwen.gguf", "agent-fleet") {
+		t.Error("removed route should be gone")
+	}
+	if !p.HasRouteWithAlias("qwen.gguf", "agent-single") {
+		t.Error("the other aliased instance should remain")
+	}
+}
+
+func TestRemoveRouteByPort(t *testing.T) {
+	p := NewProxy(nil)
+	p.AddRouteWithAlias("qwen.gguf", 8001, "agent-fleet")
+	p.AddRouteWithAlias("qwen.gguf", 8002, "agent-single")
+
+	if !p.RemoveRouteByPort(8002) {
+		t.Error("RemoveRouteByPort should succeed for known port")
+	}
+	if p.HasRouteWithAlias("qwen.gguf", "agent-single") {
+		t.Error("port-8002 route should be gone")
+	}
+	if !p.HasRouteWithAlias("qwen.gguf", "agent-fleet") {
+		t.Error("port-8001 route should remain")
+	}
+}
+
+func TestProxyRoutingByAlias(t *testing.T) {
+	backendFleet := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(`{"source":"fleet"}`))
+	}))
+	defer backendFleet.Close()
+	backendSingle := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(`{"source":"single"}`))
+	}))
+	defer backendSingle.Close()
+
+	p := NewProxy(nil)
+	p.AddRouteWithAlias("qwen.gguf", extractPort(backendFleet.URL), "agent-fleet")
+	p.AddRouteWithAlias("qwen.gguf", extractPort(backendSingle.URL), "agent-single")
+
+	body := `{"model":"agent-fleet","messages":[]}`
+	req := httptest.NewRequest("POST", "/v1/chat/completions", strings.NewReader(body))
+	rec := httptest.NewRecorder()
+	p.ServeHTTP(rec, req)
+
+	if !strings.Contains(rec.Body.String(), `"source":"fleet"`) {
+		t.Errorf("expected fleet backend, got %s", rec.Body.String())
+	}
+}
+
 func TestLoadedAtSetOnAddRoute(t *testing.T) {
 	before := time.Now()
 	p := NewProxy(nil)
