@@ -6,7 +6,7 @@ env:
   REGISTRY_USER: ${{ secrets.REGISTRY_USER }}
   REGISTRY_PASSWORD: ${{ secrets.REGISTRY_PASSWORD }}
   DOCKER_HOST: tcp://localhost:2375
-  REGISTRY: gitea-http.gitea.svc.cluster.local:3000/kit/nollama
+  REGISTRY: git.hirdforge.com/kit/nollama
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -14,7 +14,7 @@ jobs:
       - name: Install Docker CLI
         run: apk add --no-cache docker-cli
       - name: Registry login
-        run: echo $REGISTRY_PASSWORD | docker login gitea-http.gitea.svc.cluster.local:3000 -u $REGISTRY_USER --password-stdin
+        run: echo $REGISTRY_PASSWORD | docker login git.hirdforge.com -u $REGISTRY_USER --password-stdin
       - name: Clone repository
         run: rm -rf /src && git clone http://gitea-http.gitea.svc.cluster.local:3000/kit/nollama.git /src
       - name: Build and push
