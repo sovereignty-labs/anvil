@@ -209,3 +209,60 @@ func TestFindConfigNoFile(t *testing.T) {
 	// but we can assert it doesn't panic
 	_ = path
 }
+
+func TestFlagsMapToSliceBoolTrue(t *testing.T) {
+	got := FlagsMapToSlice(map[string]interface{}{"jinja": true})
+	if len(got) != 1 || got[0] != "--jinja" {
+		t.Errorf("got %v, want [--jinja]", got)
+	}
+}
+
+func TestFlagsMapToSliceBoolFalse(t *testing.T) {
+	got := FlagsMapToSlice(map[string]interface{}{"jinja": false})
+	if len(got) != 0 {
+		t.Errorf("got %v, want empty (false should omit flag)", got)
+	}
+}
+
+func TestFlagsMapToSliceStringValue(t *testing.T) {
+	got := FlagsMapToSlice(map[string]interface{}{"ctx-size": "131072"})
+	if len(got) != 2 || got[0] != "--ctx-size" || got[1] != "131072" {
+		t.Errorf("got %v, want [--ctx-size 131072]", got)
+	}
+}
+
+func TestFlagsMapToSliceStringTrue(t *testing.T) {
+	// YAML "true" (string) is NOT the same as YAML true (bool). User explicitly
+	// wants the literal string passed.
+	got := FlagsMapToSlice(map[string]interface{}{"flash-attn": "on"})
+	if len(got) != 2 || got[0] != "--flash-attn" || got[1] != "on" {
+		t.Errorf("got %v, want [--flash-attn on]", got)
+	}
+}
+
+func TestFlagsMapToSliceStringEmptyOmitted(t *testing.T) {
+	got := FlagsMapToSlice(map[string]interface{}{"foo": ""})
+	if len(got) != 0 {
+		t.Errorf("empty string value should be omitted, got %v", got)
+	}
+}
+
+func TestFlagsMapToSliceMixed(t *testing.T) {
+	got := FlagsMapToSlice(map[string]interface{}{
+		"jinja":      true,
+		"no-warmup":  false,
+		"ctx-size":   131072,
+		"flash-attn": "on",
+	})
+	// Keys sorted alphabetically: ctx-size, flash-attn, jinja, no-warmup (omitted)
+	want := []string{"--ctx-size", "131072", "--flash-attn", "on", "--jinja"}
+	if len(got) != len(want) {
+		t.Fatalf("got %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("got %v, want %v", got, want)
+			return
+		}
+	}
+}

@@ -95,8 +95,16 @@ func scoreAsset(asset ReleaseAsset, platform Platform) (int, bool) {
 
 	cuda := strings.Contains(name, "cuda")
 	rocm := strings.Contains(name, "rocm") || strings.Contains(name, "hip")
+	sycl := strings.Contains(name, "sycl")
+	vulkan := strings.Contains(name, "vulkan")
 	score := 0
 	if platform.CUDA != "" {
+		// On NVIDIA hardware, reject builds aimed at other backends — they
+		// won't use the CUDA driver and silently degrade to CPU (or worse,
+		// hang on init). Better to fall back to a generic CPU/Ubuntu build.
+		if sycl || vulkan {
+			return 0, false
+		}
 		if cuda {
 			score += 200
 		} else if rocm {

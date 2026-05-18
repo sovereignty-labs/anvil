@@ -87,11 +87,21 @@ func (s *Server) buildStatusResponse() statusResponse {
 	for stem := range aliasesByModel {
 		sort.Strings(aliasesByModel[stem])
 	}
+	// Per-instance route aliases by port (set via autoload alias: or --alias).
+	routeAliasByPort := make(map[int]string)
+	for _, r := range s.proxy.RouteStatsList() {
+		if r.Alias != "" {
+			routeAliasByPort[r.Port] = r.Alias
+		}
+	}
 	for _, proc := range procs {
 		stem := strings.ToLower(strings.TrimSuffix(proc.ModelName, ".gguf"))
-		alias := ""
-		if names := aliasesByModel[stem]; len(names) > 0 {
-			alias = strings.Join(names, ",")
+		// Per-instance route alias wins; otherwise fall back to config-level aliases.
+		alias := routeAliasByPort[proc.Port]
+		if alias == "" {
+			if names := aliasesByModel[stem]; len(names) > 0 {
+				alias = strings.Join(names, ",")
+			}
 		}
 		resp.Models = append(resp.Models, statusModel{
 			Name:          proc.ModelName,

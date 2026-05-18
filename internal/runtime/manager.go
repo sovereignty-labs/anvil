@@ -13,6 +13,7 @@ import (
 	stdruntime "runtime"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/hirdforge/nollama/internal/config"
@@ -93,7 +94,22 @@ func homeRuntimesDir() string {
 	if home, err := os.UserHomeDir(); err == nil && home != "" {
 		return filepath.Join(home, ".local", "share", "nollama", DefaultRuntimesDir)
 	}
+	warnHomeUnsetOnce()
 	return ""
+}
+
+var (
+	homeUnsetWarnOnce sync.Once
+	stderrWriter      io.Writer = os.Stderr // overridable in tests
+)
+
+// warnHomeUnsetOnce emits a single stderr line when HOME is unset, so ops
+// running nollama under systemd see why the user-local runtimes path was
+// skipped. The resolution chain still falls through to /var/lib and /tmp.
+func warnHomeUnsetOnce() {
+	homeUnsetWarnOnce.Do(func() {
+		fmt.Fprintln(stderrWriter, "warning: HOME not set; skipping user-local runtimes dir. Set runtimes_dir in config or install runtimes to /var/lib/nollama/runtimes.")
+	})
 }
 
 func runtimeDirHasEntries(dir string) bool {
