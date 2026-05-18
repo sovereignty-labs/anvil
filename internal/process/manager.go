@@ -83,6 +83,7 @@ func init() {
 		logDir:  "/tmp/nollama",
 		logger:  slog.Default(),
 	}
+	_ = os.MkdirAll(defaultManager.logDir, 0o755)
 }
 
 // GetManager returns the singleton Manager instance.
@@ -95,19 +96,23 @@ func NewManager(logger *slog.Logger) *Manager {
 	if logger == nil {
 		logger = slog.Default()
 	}
-	return &Manager{
+	m := &Manager{
 		procs:   make(map[int]*ProcessInfo),
 		portMap: make(map[int]*ProcessInfo),
 		logDir:  "/tmp/nollama",
 		logger:  logger,
 	}
+	_ = os.MkdirAll(m.logDir, 0o755)
+	return m
 }
 
-// SetLogDir configures where log files are written.
+// SetLogDir configures where log files are written. The directory is created
+// eagerly so callers that only inspect LogDir() don't see a stale path.
 func (m *Manager) SetLogDir(dir string) {
 	m.mu.Lock()
-	defer m.mu.Unlock()
 	m.logDir = dir
+	m.mu.Unlock()
+	_ = os.MkdirAll(dir, 0o755)
 }
 
 // LogDir returns the current log directory.

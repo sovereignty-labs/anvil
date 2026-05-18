@@ -84,6 +84,34 @@ func TestHandleUnloadNotRunning(t *testing.T) {
 	}
 }
 
+func TestLoadDuplicateModelReturnsConflict(t *testing.T) {
+	dir := t.TempDir()
+	modelPath := filepath.Join(dir, "qwen.gguf")
+	if err := os.WriteFile(modelPath, []byte("not a real gguf"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := config.DefaultConfig()
+	cfg.ModelDir = dir
+	srv := NewServer(cfg, "", nil)
+
+	// Simulate the model already being loaded by seeding a proxy route.
+	srv.proxy.AddRoute("qwen.gguf", 11500)
+
+	body := bytes.NewBufferString(`{"model":"qwen.gguf"}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/load", body)
+	rr := httptest.NewRecorder()
+	srv.handleLoad(rr, req)
+
+	if rr.Code != http.StatusConflict {
+		t.Fatalf("status = %d, want %d", rr.Code, http.StatusConflict)
+	}
+	data, _ := io.ReadAll(rr.Body)
+	if !strings.Contains(string(data), "already loaded") {
+		t.Fatalf("response = %s", data)
+	}
+}
+
 func TestHandleLoadBadMethod(t *testing.T) {
 	cfg := config.DefaultConfig()
 	srv := NewServer(cfg, "", nil)

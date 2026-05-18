@@ -424,9 +424,15 @@ func runLoad(cmd *cobra.Command, args []string) error {
 	// Resolve the model name from the file path
 	modelName := filepath.Base(modelPath)
 
+	manager := process.GetManager()
+	for _, proc := range manager.List() {
+		if proc.ModelName == modelName || proc.ModelPath == modelPath {
+			return fmt.Errorf("model %s is already loaded (PID %d, port %d)", modelName, proc.PID, proc.Port)
+		}
+	}
+
 	// Start the llama-server process via manager
 	fmt.Println("Starting llama-server...")
-	manager := process.GetManager()
 	procInfo, err := manager.Start(result, modelName, passthrough)
 	if err != nil {
 		return fmt.Errorf("failed to start llama-server: %w", err)

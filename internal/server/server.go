@@ -312,6 +312,11 @@ func (s *Server) loadModel(entry config.AutoloadEntry, hw *hardware.Inventory) (
 }
 
 func (s *Server) profileWarnings(requires []config.ProfileRequires) []string {
+	// When llama_server is set explicitly the user is managing the binary path
+	// directly, so profile runtime requirements are moot — suppress the warning.
+	if s.cfg != nil && strings.TrimSpace(s.cfg.LlamaServer) != "" {
+		return nil
+	}
 	activeRuntime, err := runtimemgr.NewManager().ActiveName()
 	if err != nil {
 		activeRuntime = ""
