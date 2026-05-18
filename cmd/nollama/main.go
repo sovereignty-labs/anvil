@@ -318,10 +318,16 @@ func runLoad(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("flag computation failed: %w", err)
 	}
+	if pinnedPort, _ := cmd.Flags().GetInt("port"); pinnedPort > 0 {
+		process.OverrideResultPort(result, pinnedPort)
+	}
 
 	overlayFlags, appliedProfiles, warnings, err := resolveLoadOverlay(cmd)
 	if err != nil {
 		return err
+	}
+	if alias, _ := cmd.Flags().GetString("alias"); strings.TrimSpace(alias) != "" {
+		overlayFlags["alias"] = strings.TrimSpace(alias)
 	}
 	result.Flags = process.MergePassthroughFlags(result.Flags, config.FlagsMapToSlice(overlayFlags))
 	result.Command = buildCommand(llamaServerFlag, result.Flags)
@@ -425,9 +431,14 @@ func runLoad(cmd *cobra.Command, args []string) error {
 	modelName := filepath.Base(modelPath)
 
 	manager := process.GetManager()
-	for _, proc := range manager.List() {
-		if proc.ModelName == modelName || proc.ModelPath == modelPath {
-			return fmt.Errorf("model %s is already loaded (PID %d, port %d)", modelName, proc.PID, proc.Port)
+	cliAlias, _ := cmd.Flags().GetString("alias")
+	// When --alias is set the user is intentionally registering an additional
+	// instance, so duplicate filename is allowed (each gets its own port/alias).
+	if strings.TrimSpace(cliAlias) == "" {
+		for _, proc := range manager.List() {
+			if proc.ModelName == modelName || proc.ModelPath == modelPath {
+				return fmt.Errorf("model %s is already loaded (PID %d, port %d); pass --alias to load a second instance", modelName, proc.PID, proc.Port)
+			}
 		}
 	}
 
@@ -736,6 +747,14 @@ func buildRemoteLoadRequest(cmd *cobra.Command, modelPath string) (federation.Lo
 	if err != nil {
 		return federation.LoadRequest{}, nil, nil, err
 	}
+	port, err := cmd.Flags().GetInt("port")
+	if err != nil {
+		return federation.LoadRequest{}, nil, nil, err
+	}
+	alias, err := cmd.Flags().GetString("alias")
+	if err != nil {
+		return federation.LoadRequest{}, nil, nil, err
+	}
 	overlayFlags, appliedProfiles, warnings, err := resolveLoadOverlay(cmd)
 	if err != nil {
 		return federation.LoadRequest{}, nil, nil, err
@@ -746,6 +765,8 @@ func buildRemoteLoadRequest(cmd *cobra.Command, modelPath string) (federation.Lo
 		CPU:   cpu,
 		Flags: overlayFlags,
 		Swap:  swap,
+		Port:  port,
+		Alias: alias,
 	}
 	if !cpu && gpu >= 0 {
 		req.GPU = &gpu
@@ -872,6 +893,8 @@ func init() {
 	loadCmd.Flags().StringSlice("profile", nil, "Apply one or more hardware profiles")
 	loadCmd.Flags().Bool("dry-run", false, "Show what would be passed to llama-server")
 	loadCmd.Flags().Bool("swap", false, "Evict LRU model if VRAM is full")
+	loadCmd.Flags().Int("port", 0, "Pin llama-server to this port instead of auto-assigning")
+	loadCmd.Flags().String("alias", "", "Register this load under an alias so the same GGUF can be loaded multiple times with different configs")
 	loadCmd.Flags().StringArray("passthrough", []string{}, "Extra llama-server flags to append (can be used multiple times)")
 
 	// unload flags

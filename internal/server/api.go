@@ -32,6 +32,8 @@ type loadRequest struct {
 	CPU   bool           `json:"cpu,omitempty"`
 	Flags map[string]any `json:"flags,omitempty"`
 	Swap  bool           `json:"swap,omitempty"`
+	Port  int            `json:"port,omitempty"`
+	Alias string         `json:"alias,omitempty"`
 }
 
 type loadResponse struct {
@@ -314,8 +316,12 @@ func (s *Server) handleLoad(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if s.proxy.HasRoute(req.Model) {
-		writeAPIError(w, http.StatusConflict, fmt.Sprintf("model %s is already loaded", req.Model))
+	if s.proxy.HasRouteWithAlias(req.Model, req.Alias) {
+		key := req.Alias
+		if key == "" {
+			key = req.Model
+		}
+		writeAPIError(w, http.StatusConflict, fmt.Sprintf("model %s is already loaded (route %q)", req.Model, key))
 		return
 	}
 
@@ -360,8 +366,14 @@ func (s *Server) handleLoad(w http.ResponseWriter, r *http.Request) {
 		writeAPIError(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	if req.Port > 0 {
+		process.OverrideResultPort(result, req.Port)
+	}
 
 	passthrough := config.FlagsMapToSlice(req.Flags)
+	if alias := strings.TrimSpace(req.Alias); alias != "" {
+		passthrough = append(passthrough, "--alias", alias)
+	}
 	procInfo, err := s.procMgr.Start(result, filepath.Base(req.Model), passthrough)
 	if err != nil && req.Swap {
 		lru := s.proxy.LRURoute()
@@ -379,7 +391,7 @@ func (s *Server) handleLoad(w http.ResponseWriter, r *http.Request) {
 			writeAPIError(w, http.StatusInternalServerError, fmt.Sprintf("evict LRU %s: %v", lru.ModelName, stopErr))
 			return
 		}
-		s.proxy.RemoveRoute(lru.ModelName)
+		s.proxy.RemoveRouteByPort(lru.Port)
 
 		procInfo, err = s.procMgr.Start(result, filepath.Base(req.Model), passthrough)
 	}
@@ -388,7 +400,7 @@ func (s *Server) handleLoad(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	procInfo.ModelPath = modelPath
-	s.proxy.AddRoute(req.Model, procInfo.Port)
+	s.proxy.AddRouteWithAlias(req.Model, procInfo.Port, req.Alias)
 
 	writeJSON(w, http.StatusOK, loadResponse{
 		Status: "ok",
@@ -421,7 +433,7 @@ func (s *Server) handleUnload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	for _, proc := range stopped {
-		s.proxy.RemoveRoute(filepath.Base(proc.ModelName))
+		s.proxy.RemoveRouteByPort(proc.Port)
 	}
 
 	writeJSON(w, http.StatusOK, unloadResponse{Status: "ok"})

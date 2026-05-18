@@ -75,6 +75,15 @@ type AutoloadEntry struct {
 	// Profiles are named built-in flag bundles applied before explicit flags.
 	Profiles []string `yaml:"profiles"`
 
+	// Port pins the llama-server HTTP port. 0 or omitted = auto-assign.
+	Port int `yaml:"port,omitempty"`
+
+	// Alias is the proxy route key for this instance. When non-empty, the
+	// proxy keys this route on the alias instead of the filename stem,
+	// allowing the same GGUF to be loaded multiple times with different
+	// configs (different GPUs, ports, flags) and addressed independently.
+	Alias string `yaml:"alias,omitempty"`
+
 	// Flags are llama-server flags for this model.
 	Flags map[string]interface{} `yaml:"flags"`
 }

@@ -252,9 +252,10 @@ func (s *Server) autoloadModels(hw *hardware.Inventory) {
 			continue
 		}
 
-		s.proxy.AddRoute(entry.Model, port)
+		s.proxy.AddRouteWithAlias(entry.Model, port, entry.Alias)
 		s.logger.Info("autoloaded",
 			"model", entry.Model,
+			"alias", entry.Alias,
 			"port", port,
 		)
 	}
@@ -269,6 +270,7 @@ func (s *Server) loadModel(entry config.AutoloadEntry, hw *hardware.Inventory) (
 	opts := process.StartOpts{
 		ModelPath:   modelPath,
 		LlamaServer: s.cfg.LlamaServer,
+		PinnedPort:  entry.Port,
 	}
 
 	// GPU selection
@@ -290,6 +292,11 @@ func (s *Server) loadModel(entry config.AutoloadEntry, hw *hardware.Inventory) (
 		)
 	}
 	opts.ExtraFlags = config.FlagsMapToSlice(merged)
+	// When an alias is configured, pass --alias to llama-server so its
+	// /v1/models response advertises the alias as the model name.
+	if alias := strings.TrimSpace(entry.Alias); alias != "" {
+		opts.ExtraFlags = append(opts.ExtraFlags, "--alias", alias)
+	}
 
 	// Hardware for smart defaults
 	if hw != nil {
@@ -327,38 +334,47 @@ func (s *Server) profileWarnings(requires []config.ProfileRequires) []string {
 // reconcileModels compares desired state (config autoload) with actual state
 // (running processes) and loads/unloads as needed.
 func (s *Server) reconcileModels(hw *hardware.Inventory) {
-	// Build desired set from config
+	// Build desired set from config keyed on the proxy route key so multiple
+	// autoload entries that share a filename but differ by alias coexist.
 	desired := make(map[string]config.AutoloadEntry)
 	for _, entry := range s.cfg.Autoload {
-		stem := strings.ToLower(strings.TrimSuffix(entry.Model, ".gguf"))
-		desired[stem] = entry
+		desired[routeKeyFor(entry.Model, entry.Alias)] = entry
 	}
 
-	// Get current running processes
-	running := s.procMgr.List()
-	currentStems := make(map[string]bool)
-	for _, proc := range running {
-		stem := strings.ToLower(strings.TrimSuffix(filepath.Base(proc.ModelName), ".gguf"))
-		currentStems[stem] = true
+	// Cross-reference running processes against current proxy routes so we
+	// can identify each process by route key (which carries the alias).
+	routeKeyByPort := make(map[int]string)
+	for _, r := range s.proxy.RouteStatsList() {
+		routeKeyByPort[r.Port] = r.RouteKey
+	}
 
-		// Unload models no longer in config
-		if _, want := desired[stem]; !want {
-			s.logger.Info("reconcile: unloading removed model", "model", proc.ModelName)
+	running := s.procMgr.List()
+	currentKeys := make(map[string]bool)
+	for _, proc := range running {
+		key, ok := routeKeyByPort[proc.Port]
+		if !ok {
+			// Process is running but no proxy route exists for it — fall back to
+			// filename stem so old entries still get cleaned up.
+			key = routeKeyFor(filepath.Base(proc.ModelName), "")
+		}
+		currentKeys[key] = true
+
+		if _, want := desired[key]; !want {
+			s.logger.Info("reconcile: unloading removed model", "model", proc.ModelName, "key", key)
 			s.procMgr.StopByPort(proc.Port)
-			s.proxy.RemoveRoute(filepath.Base(proc.ModelName))
+			s.proxy.RemoveRouteByPort(proc.Port)
 		}
 	}
 
-	// Load models that should be running but aren't
-	for stem, entry := range desired {
-		if !currentStems[stem] {
-			s.logger.Info("reconcile: loading new model", "model", entry.Model)
+	for key, entry := range desired {
+		if !currentKeys[key] {
+			s.logger.Info("reconcile: loading new model", "model", entry.Model, "alias", entry.Alias)
 			port, err := s.loadModel(entry, hw)
 			if err != nil {
 				s.logger.Error("reconcile: load failed", "model", entry.Model, "error", err)
 				continue
 			}
-			s.proxy.AddRoute(entry.Model, port)
+			s.proxy.AddRouteWithAlias(entry.Model, port, entry.Alias)
 		}
 	}
 }

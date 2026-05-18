@@ -60,7 +60,7 @@ func (s *Server) unloadIdleRoute(r IdleRoute, threshold time.Duration) {
 		)
 		return
 	}
-	s.proxy.RemoveRoute(r.ModelName)
+	s.proxy.RemoveRouteByPort(r.Port)
 }
 
 // snapshotConfig returns the current config under the server mutex.

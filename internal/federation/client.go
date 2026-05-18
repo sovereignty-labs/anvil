@@ -58,6 +58,8 @@ type LoadRequest struct {
 	CPU   bool           `json:"cpu,omitempty"`
 	Flags map[string]any `json:"flags,omitempty"`
 	Swap  bool           `json:"swap,omitempty"`
+	Port  int            `json:"port,omitempty"`
+	Alias string         `json:"alias,omitempty"`
 }
 
 // LoadResult mirrors internal/server.loadResponse.
