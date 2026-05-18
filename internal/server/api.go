@@ -314,6 +314,11 @@ func (s *Server) handleLoad(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if s.proxy.HasRoute(req.Model) {
+		writeAPIError(w, http.StatusConflict, fmt.Sprintf("model %s is already loaded", req.Model))
+		return
+	}
+
 	modelPath := s.cfg.ModelPath(req.Model)
 	if _, err := os.Stat(modelPath); err != nil {
 		writeAPIError(w, http.StatusBadRequest, fmt.Sprintf("model not found: %s", req.Model))

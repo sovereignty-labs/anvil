@@ -126,6 +126,15 @@ func (p *Proxy) SetAliases(aliases map[string]string) {
 	}
 }
 
+// HasRoute reports whether a route exists for the given model filename.
+func (p *Proxy) HasRoute(modelFilename string) bool {
+	stem := strings.ToLower(strings.TrimSuffix(modelFilename, ".gguf"))
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	_, ok := p.routes[stem]
+	return ok
+}
+
 // RouteCount returns the number of active routes.
 func (p *Proxy) RouteCount() int {
 	p.mu.RLock()
