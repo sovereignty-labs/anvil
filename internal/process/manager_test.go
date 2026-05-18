@@ -1179,3 +1179,74 @@ func TestStartOptsStart_CPU_Device_Flags(t *testing.T) {
 
 	manager.StopByPort(port)
 }
+
+func TestBuildChildEnvGPUIsolation(t *testing.T) {
+	t.Setenv("CUDA_VISIBLE_DEVICES", "stale")
+
+	env := buildChildEnv(1, false)
+	want := "CUDA_VISIBLE_DEVICES=1"
+	found := false
+	stale := false
+	for _, e := range env {
+		if e == want {
+			found = true
+		}
+		if e == "CUDA_VISIBLE_DEVICES=stale" {
+			stale = true
+		}
+	}
+	if !found {
+		t.Errorf("expected env to contain %q, got %v", want, envContainingCUDA(env))
+	}
+	if stale {
+		t.Errorf("stale CUDA_VISIBLE_DEVICES leaked into child env")
+	}
+}
+
+func TestBuildChildEnvCPUFallback(t *testing.T) {
+	env := buildChildEnv(-1, true)
+	want := "CUDA_VISIBLE_DEVICES="
+	for _, e := range env {
+		if e == want {
+			return
+		}
+	}
+	t.Errorf("expected env to contain empty CUDA_VISIBLE_DEVICES, got %v", envContainingCUDA(env))
+}
+
+func TestBuildChildEnvNoGPUIndexLeavesUnset(t *testing.T) {
+	// No GPU and not forced CPU: don't override CUDA_VISIBLE_DEVICES at all.
+	t.Setenv("CUDA_VISIBLE_DEVICES", "")
+	env := buildChildEnv(-1, false)
+	for _, e := range env {
+		if strings.HasPrefix(e, "CUDA_VISIBLE_DEVICES=") {
+			t.Errorf("expected no CUDA_VISIBLE_DEVICES entry, got %s", e)
+		}
+	}
+}
+
+func TestParseCUDADeviceIndex(t *testing.T) {
+	cases := map[string]int{
+		"cuda:0": 0,
+		"cuda:1": 1,
+		"cuda:7": 7,
+		"cpu":    -1,
+		"":       -1,
+		"cuda:":  -1,
+	}
+	for in, want := range cases {
+		if got := parseCUDADeviceIndex(in); got != want {
+			t.Errorf("parseCUDADeviceIndex(%q) = %d, want %d", in, got, want)
+		}
+	}
+}
+
+func envContainingCUDA(env []string) []string {
+	out := make([]string, 0)
+	for _, e := range env {
+		if strings.HasPrefix(e, "CUDA_VISIBLE_DEVICES=") {
+			out = append(out, e)
+		}
+	}
+	return out
+}

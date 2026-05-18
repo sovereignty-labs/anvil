@@ -316,11 +316,17 @@ func FlagsMapToSlice(flags map[string]interface{}) []string {
 		flag := "--" + key
 		switch val := flags[key].(type) {
 		case bool:
+			// YAML "true" / "false" — boolean flags are bare when true and
+			// omitted when false (passing --jinja false breaks llama-server).
 			if val {
 				result = append(result, flag)
 			}
 		case string:
-			result = append(result, flag, val)
+			// Omit empty strings so a stray flags: { foo: "" } in config
+			// doesn't render as --foo "" and confuse llama-server.
+			if val != "" {
+				result = append(result, flag, val)
+			}
 		default:
 			result = append(result, flag, fmt.Sprintf("%v", val))
 		}

@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -140,6 +141,45 @@ func (m *Manager) openLogFile(port int) (*os.File, error) {
 	return os.OpenFile(filepath.Join(m.logDir, name), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
 }
 
+// buildChildEnv returns the environment for a spawned llama-server process,
+// isolating it to a specific GPU (or hiding all GPUs in CPU mode).
+//
+// When gpuIndex >= 0 and forceCPU is false, sets CUDA_VISIBLE_DEVICES=<index>
+// so llama-server only sees that single device (it becomes its device 0).
+// In CPU mode, clears CUDA_VISIBLE_DEVICES so GPU auto-fit doesn't hang.
+// Any pre-existing CUDA_VISIBLE_DEVICES in the parent env is stripped first
+// to avoid a stale value sneaking in from the shell.
+func buildChildEnv(gpuIndex int, forceCPU bool) []string {
+	parent := os.Environ()
+	filtered := make([]string, 0, len(parent)+1)
+	for _, e := range parent {
+		if !strings.HasPrefix(e, "CUDA_VISIBLE_DEVICES=") {
+			filtered = append(filtered, e)
+		}
+	}
+	switch {
+	case forceCPU:
+		filtered = append(filtered, "CUDA_VISIBLE_DEVICES=")
+	case gpuIndex >= 0:
+		filtered = append(filtered, fmt.Sprintf("CUDA_VISIBLE_DEVICES=%d", gpuIndex))
+	}
+	return filtered
+}
+
+// parseCUDADeviceIndex extracts N from a "cuda:N" device string. Returns -1
+// when the input is not a CUDA device specifier.
+func parseCUDADeviceIndex(device string) int {
+	const prefix = "cuda:"
+	if !strings.HasPrefix(device, prefix) {
+		return -1
+	}
+	n, err := strconv.Atoi(device[len(prefix):])
+	if err != nil {
+		return -1
+	}
+	return n
+}
+
 // MergePassthroughFlags merges passthrough flags into the computed flags.
 // Passthrough flags override computed ones with the same key.
 func MergePassthroughFlags(computed []string, passthrough []string) []string {
@@ -230,10 +270,10 @@ func (m *Manager) Start(result *Result, modelName string, passthrough []string) 
 		logFile:   logFile,
 	}
 
-	// Hide GPUs from llama-server in CPU fallback mode to prevent hanging on GPU auto-fit
-	if result.CPUFallback {
-		cmd.Env = append(os.Environ(), "CUDA_VISIBLE_DEVICES=")
-	}
+	// Isolate the spawned process to its assigned GPU (or hide all GPUs in CPU
+	// mode) so two llama-servers can't spread across the same device. With
+	// CUDA_VISIBLE_DEVICES=N, llama-server sees a single device as its index 0.
+	cmd.Env = buildChildEnv(parseCUDADeviceIndex(result.SelectedDevice), result.CPUFallback)
 
 	// Start the process
 	if err := cmd.Start(); err != nil {
@@ -314,10 +354,13 @@ func (m *Manager) StartOptsStart(opts StartOpts) (int, error) {
 	cmd.Stdout = logFile
 	cmd.Stderr = logFile
 
-	// Hide GPUs in CPU mode
+	// Isolate the spawned process to its assigned GPU (or hide all GPUs in CPU
+	// mode). See buildChildEnv for details on CUDA_VISIBLE_DEVICES handling.
+	gpuForEnv := opts.GPU
 	if opts.ForceCPU {
-		cmd.Env = append(os.Environ(), "CUDA_VISIBLE_DEVICES=")
+		gpuForEnv = -1
 	}
+	cmd.Env = buildChildEnv(gpuForEnv, opts.ForceCPU)
 
 	modelName := filepath.Base(opts.ModelPath)
 

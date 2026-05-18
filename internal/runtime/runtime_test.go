@@ -1,8 +1,11 @@
 package runtime
 
 import (
+	"bytes"
 	"os"
 	"path/filepath"
+	"strings"
+	"sync"
 	"testing"
 )
 
@@ -126,5 +129,57 @@ func TestResolveNoActiveRuntime(t *testing.T) {
 	_, err := mgr.Resolve()
 	if err == nil {
 		t.Fatal("expected error when no active runtime exists")
+	}
+}
+
+func TestSelectAssetRejectsSYCLAndVulkanOnNvidia(t *testing.T) {
+	platform := Platform{OS: "linux", Arch: "amd64", CUDA: "available"}
+	assets := []ReleaseAsset{
+		{Name: "llama-b9219-bin-ubuntu-sycl-fp16-x64.tar.gz"},
+		{Name: "llama-b9219-bin-ubuntu-vulkan-x64.tar.gz"},
+		{Name: "llama-b9219-bin-ubuntu-x64.tar.gz"},
+	}
+	selected, err := SelectAsset(assets, platform)
+	if err != nil {
+		t.Fatalf("SelectAsset failed: %v", err)
+	}
+	if strings.Contains(selected.Name, "sycl") || strings.Contains(selected.Name, "vulkan") {
+		t.Errorf("expected SYCL/Vulkan to be rejected on NVIDIA, got %q", selected.Name)
+	}
+	if selected.Name != "llama-b9219-bin-ubuntu-x64.tar.gz" {
+		t.Errorf("expected generic ubuntu-x64 to win, got %q", selected.Name)
+	}
+}
+
+func TestSelectAssetPrefersCudaWhenAvailable(t *testing.T) {
+	platform := Platform{OS: "linux", Arch: "amd64", CUDA: "available"}
+	assets := []ReleaseAsset{
+		{Name: "llama-b9219-bin-ubuntu-sycl-fp16-x64.tar.gz"},
+		{Name: "llama-b9219-bin-ubuntu-cuda-cu12.4-x64.tar.gz"},
+		{Name: "llama-b9219-bin-ubuntu-x64.tar.gz"},
+	}
+	selected, err := SelectAsset(assets, platform)
+	if err != nil {
+		t.Fatalf("SelectAsset failed: %v", err)
+	}
+	if !strings.Contains(selected.Name, "cuda") {
+		t.Errorf("expected CUDA asset, got %q", selected.Name)
+	}
+}
+
+func TestHomeRuntimesDirEmptyWhenHOMEUnset(t *testing.T) {
+	t.Setenv("HOME", "")
+	// Reset the once so the warning would fire if HOME is empty — but
+	// what we care about is that the function returns "" cleanly.
+	homeUnsetWarnOnce = sync.Once{}
+	var sink bytes.Buffer
+	stderrWriter = &sink
+	t.Cleanup(func() { stderrWriter = os.Stderr })
+
+	if got := homeRuntimesDir(); got != "" {
+		t.Errorf("homeRuntimesDir() with empty HOME = %q, want \"\"", got)
+	}
+	if !strings.Contains(sink.String(), "HOME not set") {
+		t.Errorf("expected stderr warning, got %q", sink.String())
 	}
 }
