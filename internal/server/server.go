@@ -32,6 +32,10 @@ type Server struct {
 	mcpRunner  *nollamamcp.Runner
 	logger     *slog.Logger
 
+	// stopProcessByPort is the hook the idle reaper calls to terminate a
+	// llama-server process. Defaults to procMgr.StopByPort; tests override.
+	stopProcessByPort func(int) (*process.ProcessInfo, error)
+
 	mu      sync.Mutex
 	running bool
 }
@@ -41,13 +45,15 @@ func NewServer(cfg *config.Config, cfgPath string, logger *slog.Logger) *Server 
 	if logger == nil {
 		logger = slog.Default()
 	}
-	return &Server{
+	srv := &Server{
 		cfg:     cfg,
 		cfgPath: cfgPath,
 		proxy:   NewProxy(logger.With("component", "proxy")),
 		procMgr: process.NewManager(logger.With("component", "process")),
 		logger:  logger,
 	}
+	srv.stopProcessByPort = srv.procMgr.StopByPort
+	return srv
 }
 
 // Run starts the daemon. Blocks until shutdown signal received.
@@ -125,6 +131,11 @@ func (s *Server) Run(ctx context.Context) error {
 			errCh <- err
 		}
 	}()
+
+	// Idle reaper — proactively unloads models idle longer than swap.idle_timeout.
+	reaperCtx, cancelReaper := context.WithCancel(ctx)
+	defer cancelReaper()
+	go s.startIdleReaper(reaperCtx)
 
 	s.logger.Info("nollama serve ready",
 		"models_loaded", s.proxy.RouteCount(),

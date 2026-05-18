@@ -336,6 +336,114 @@ func TestProxyRequestTrackingUpdates(t *testing.T) {
 	}
 }
 
+func TestLoadedAtSetOnAddRoute(t *testing.T) {
+	before := time.Now()
+	p := NewProxy(nil)
+	p.AddRoute("model-a.gguf", 11111)
+	after := time.Now()
+
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	if len(p.all) != 1 {
+		t.Fatalf("expected 1 route, got %d", len(p.all))
+	}
+	r := p.all[0]
+	if r.LoadedAt.Before(before) || r.LoadedAt.After(after) {
+		t.Errorf("LoadedAt %v not between %v and %v", r.LoadedAt, before, after)
+	}
+}
+
+func TestIdleRoutesReturnsIdleModels(t *testing.T) {
+	p := NewProxy(nil)
+	p.AddRoute("idle.gguf", 11111)
+	p.AddRoute("active.gguf", 22222)
+
+	// Back-date idle: loaded long ago, last request long ago.
+	// Keep active fresh.
+	long := -2 * time.Hour
+	p.mu.Lock()
+	for _, r := range p.all {
+		if r.ModelName == "idle.gguf" {
+			r.LoadedAt = time.Now().Add(long)
+			r.LastRequest = time.Now().Add(long)
+		}
+	}
+	p.mu.Unlock()
+
+	idle := p.IdleRoutes(30 * time.Minute)
+	if len(idle) != 1 {
+		t.Fatalf("expected 1 idle route, got %d", len(idle))
+	}
+	if idle[0].ModelName != "idle.gguf" {
+		t.Errorf("expected idle.gguf, got %s", idle[0].ModelName)
+	}
+}
+
+func TestIdleRoutesGracePeriod(t *testing.T) {
+	p := NewProxy(nil)
+	p.AddRoute("fresh.gguf", 11111)
+
+	// LastRequest is ancient, but LoadedAt is recent (just-added) — grace.
+	p.mu.Lock()
+	for _, r := range p.all {
+		r.LastRequest = time.Now().Add(-24 * time.Hour)
+	}
+	p.mu.Unlock()
+
+	idle := p.IdleRoutes(30 * time.Minute)
+	if len(idle) != 0 {
+		t.Errorf("expected 0 idle routes within grace period, got %d", len(idle))
+	}
+}
+
+func TestIdleRoutesNeverUsedModel(t *testing.T) {
+	p := NewProxy(nil)
+	p.AddRoute("never-used.gguf", 11111)
+
+	// Back-date LoadedAt past the threshold; clear LastRequest so the reaper
+	// falls back to LoadedAt as the idle reference.
+	p.mu.Lock()
+	for _, r := range p.all {
+		r.LoadedAt = time.Now().Add(-2 * time.Hour)
+		r.LastRequest = time.Time{}
+	}
+	p.mu.Unlock()
+
+	idle := p.IdleRoutes(30 * time.Minute)
+	if len(idle) != 1 {
+		t.Fatalf("expected 1 idle route (never-used past threshold), got %d", len(idle))
+	}
+	if idle[0].ModelName != "never-used.gguf" {
+		t.Errorf("expected never-used.gguf, got %s", idle[0].ModelName)
+	}
+}
+
+func TestIdleRoutesNoIdleModels(t *testing.T) {
+	p := NewProxy(nil)
+	p.AddRoute("a.gguf", 11111)
+	p.AddRoute("b.gguf", 22222)
+
+	idle := p.IdleRoutes(30 * time.Minute)
+	if len(idle) != 0 {
+		t.Errorf("expected 0 idle routes, got %d", len(idle))
+	}
+}
+
+func TestIdleRoutesZeroThreshold(t *testing.T) {
+	p := NewProxy(nil)
+	p.AddRoute("ancient.gguf", 11111)
+	p.mu.Lock()
+	for _, r := range p.all {
+		r.LoadedAt = time.Now().Add(-24 * time.Hour)
+		r.LastRequest = time.Now().Add(-24 * time.Hour)
+	}
+	p.mu.Unlock()
+
+	if got := p.IdleRoutes(0); len(got) != 0 {
+		t.Errorf("expected zero-threshold to disable selection, got %d", len(got))
+	}
+}
+
 // extractPort pulls the port number from an httptest.Server URL.
 func extractPort(rawURL string) int {
 	parts := strings.Split(rawURL, ":")

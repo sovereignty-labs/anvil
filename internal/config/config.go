@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"time"
 
 	"gopkg.in/yaml.v3"
 )
@@ -88,6 +89,23 @@ type GPUOverride struct {
 type SwapConfig struct {
 	Enabled     bool   `yaml:"enabled"`
 	IdleTimeout string `yaml:"idle_timeout"` // e.g. "30m"
+}
+
+// IdleTimeoutDuration parses IdleTimeout as a Go duration. Returns 0 (which
+// disables the idle reaper) if the field is empty or unparseable.
+func (s *SwapConfig) IdleTimeoutDuration() time.Duration {
+	if s == nil {
+		return 0
+	}
+	v := s.IdleTimeout
+	if v == "" {
+		return 0
+	}
+	d, err := time.ParseDuration(v)
+	if err != nil {
+		return 0
+	}
+	return d
 }
 
 // ManagementConfig controls the management API.

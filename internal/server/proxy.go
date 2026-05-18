@@ -28,11 +28,23 @@ type Route struct {
 	// Port is the llama-server port.
 	Port int
 
+	// LoadedAt records when this route was registered. Used as the grace-period
+	// reference for the idle reaper.
+	LoadedAt time.Time
+
 	// LastRequest is updated on every proxied request. Initialized at load time.
 	LastRequest time.Time
 
 	// RequestCount is the total number of requests proxied through this route.
 	RequestCount int64
+}
+
+// IdleRoute describes a route that has exceeded the idle threshold.
+type IdleRoute struct {
+	ModelName string
+	Port      int
+	IdleSince time.Time
+	LoadedAt  time.Time
 }
 
 // RouteStats is a snapshot of a route for metrics exposition.
@@ -72,11 +84,13 @@ func (p *Proxy) AddRoute(modelFilename string, port int) {
 	stem := strings.ToLower(strings.TrimSuffix(modelFilename, ".gguf"))
 	backend, _ := url.Parse(fmt.Sprintf("http://127.0.0.1:%d", port))
 
+	now := time.Now()
 	route := &Route{
 		ModelName:   modelFilename,
 		BackendURL:  backend,
 		Port:        port,
-		LastRequest: time.Now(),
+		LoadedAt:    now,
+		LastRequest: now,
 	}
 
 	p.mu.Lock()
@@ -86,15 +100,20 @@ func (p *Proxy) AddRoute(modelFilename string, port int) {
 	p.logger.Info("route added", "model", modelFilename, "port", port)
 }
 
-// RemoveRoute removes a model's routing entry.
-func (p *Proxy) RemoveRoute(modelFilename string) {
+// RemoveRoute removes a model's routing entry. Returns true if a route was found
+// and removed, false otherwise.
+func (p *Proxy) RemoveRoute(modelFilename string) bool {
 	stem := strings.ToLower(strings.TrimSuffix(modelFilename, ".gguf"))
 
 	p.mu.Lock()
 	defer p.mu.Unlock()
+	if _, ok := p.routes[stem]; !ok {
+		return false
+	}
 	delete(p.routes, stem)
 	p.rebuildAllLocked()
 	p.logger.Info("route removed", "model", modelFilename)
+	return true
 }
 
 // SetAliases updates the alias map.
@@ -130,6 +149,41 @@ func (p *Proxy) LRURoute() *Route {
 		}
 	}
 	return lru
+}
+
+// IdleRoutes returns routes that have been idle longer than threshold AND have
+// outlived the grace period (time since LoadedAt > threshold). Returns an empty
+// slice when threshold <= 0. If a route has never received a request, LoadedAt
+// is used as the idle reference.
+func (p *Proxy) IdleRoutes(threshold time.Duration) []IdleRoute {
+	if threshold <= 0 {
+		return nil
+	}
+
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+
+	now := time.Now()
+	var idle []IdleRoute
+	for _, r := range p.all {
+		if now.Sub(r.LoadedAt) <= threshold {
+			continue
+		}
+		idleSince := r.LastRequest
+		if idleSince.IsZero() {
+			idleSince = r.LoadedAt
+		}
+		if now.Sub(idleSince) <= threshold {
+			continue
+		}
+		idle = append(idle, IdleRoute{
+			ModelName: r.ModelName,
+			Port:      r.Port,
+			IdleSince: idleSince,
+			LoadedAt:  r.LoadedAt,
+		})
+	}
+	return idle
 }
 
 // RouteStatsList returns a snapshot of all routes for metrics exposition.
