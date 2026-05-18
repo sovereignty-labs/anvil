@@ -11,8 +11,8 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - name: Install Docker CLI
-        run: apk add --no-cache docker-cli
+      - name: Install tools
+        run: apk add --no-cache docker-cli curl jq
       - name: Registry login
         run: echo $REGISTRY_PASSWORD | docker login git.hirdforge.com -u $REGISTRY_USER --password-stdin
       - name: Clone repository
@@ -29,3 +29,41 @@ jobs:
             -t $REGISTRY/nollama:sha-${SHA_SHORT} .
           docker push $REGISTRY/nollama:latest
           docker push $REGISTRY/nollama:sha-${SHA_SHORT}
+      - name: Publish binary
+        run: |
+          cd /src
+          SHA_SHORT=$(git rev-parse --short HEAD)
+          GITEA_API=http://gitea-http.gitea.svc.cluster.local:3000/api/v1
+          AUTH="Authorization: token ${REGISTRY_PASSWORD}"
+
+          # Extract binary from image
+          docker create --name tmp $REGISTRY/nollama:latest
+          docker cp tmp:/usr/local/bin/nollama /tmp/nollama
+          docker rm tmp
+
+          # Delete existing 'latest' release if present
+          RELEASE_ID=$(curl -s -H "$AUTH" "$GITEA_API/repos/kit/nollama/releases/tags/latest" | jq -r '.id // empty')
+          if [ -n "$RELEASE_ID" ]; then
+            curl -s -X DELETE -H "$AUTH" "$GITEA_API/repos/kit/nollama/releases/$RELEASE_ID"
+            # Delete the tag too so it can be recreated at new commit
+            curl -s -X DELETE -H "$AUTH" "$GITEA_API/repos/kit/nollama/tags/latest"
+          fi
+
+          # Create new 'latest' release pointing at this commit
+          RELEASE_RESPONSE=$(curl -s -X POST -H "$AUTH" -H "Content-Type: application/json" \
+            -d "{\"tag_name\":\"latest\",\"name\":\"Latest Build (${SHA_SHORT})\",\"body\":\"Automated build from main at ${SHA_SHORT}\",\"prerelease\":true,\"target_commitish\":\"main\"}" \
+            "$GITEA_API/repos/kit/nollama/releases")
+          RELEASE_ID=$(echo "$RELEASE_RESPONSE" | jq -r '.id')
+
+          if [ "$RELEASE_ID" = "null" ] || [ -z "$RELEASE_ID" ]; then
+            echo "ERROR: Release creation failed"
+            echo "$RELEASE_RESPONSE"
+            exit 1
+          fi
+
+          # Upload binary as release asset
+          curl -s -X POST -H "$AUTH" \
+            -F "attachment=@/tmp/nollama" \
+            "$GITEA_API/repos/kit/nollama/releases/${RELEASE_ID}/assets?name=nollama-linux-amd64"
+
+          echo "Published nollama binary at ${SHA_SHORT}"
