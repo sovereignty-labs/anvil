@@ -16,7 +16,7 @@ jobs:
       - name: Registry login
         run: echo $REGISTRY_PASSWORD | docker login gitea-http.gitea.svc.cluster.local:3000 -u $REGISTRY_USER --password-stdin
       - name: Clone repository
-        run: rm -rf /src && git clone http://${REGISTRY_USER}:${REGISTRY_PASSWORD}@gitea-http.gitea.svc.cluster.local:3000/kit/nollama.git /src
+        run: rm -rf /src && git clone "http://${REGISTRY_USER}:${REGISTRY_PASSWORD}@gitea-http.gitea.svc.cluster.local:3000/kit/nollama.git" /src
       - name: Build and push
         run: |
           cd /src
