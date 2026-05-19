@@ -21,10 +21,16 @@ jobs:
         run: |
           cd /src
           SHA_SHORT=$(git rev-parse --short HEAD)
+          # Tag pushes (GITEA_REF_TYPE=tag) → VERSION is the tag; else "dev".
+          if [ "${GITEA_REF_TYPE}" = "tag" ] && [ -n "${GITEA_REF_NAME}" ]; then
+            VERSION="${GITEA_REF_NAME}"
+          else
+            VERSION="dev"
+          fi
           docker build \
-            --build-arg VERSION=dev \
-            --build-arg COMMIT=${SHA_SHORT} \
-            --build-arg DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ) \
+            --build-arg VERSION="${VERSION}" \
+            --build-arg COMMIT="${SHA_SHORT}" \
+            --build-arg DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
             -t $REGISTRY/nollama:latest \
             -t $REGISTRY/nollama:sha-${SHA_SHORT} .
           docker push $REGISTRY/nollama:latest
