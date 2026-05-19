@@ -44,7 +44,7 @@ No blob store. No proprietary formats. No cloud.
 Powered by llama.cpp (Georgi Gerganov). MIT licensed.`,
 	SilenceUsage:  true,
 	SilenceErrors: true,
-	Version:       version.Version,
+	Version:       version.String(),
 }
 
 // --- load ---
@@ -860,7 +860,12 @@ func init() {
 	rootCmd.PersistentFlags().String("node", "", "Target a specific remote node")
 	rootCmd.PersistentFlags().String("llama-server", "", "Path to llama-server binary (required; also checked via NOLLAMA_LLAMA_SERVER env var)")
 
+	// rootCmd.Version is set to version.String(); customize the template so
+	// `--version` prints just that string, without cobra's "name version <X>" wrap.
+	rootCmd.SetVersionTemplate("{{.Version}}\n")
+
 	// Register subcommands
+	rootCmd.AddCommand(versionCmd)
 	rootCmd.AddCommand(serveCmd)
 	rootCmd.AddCommand(loadCmd)
 	rootCmd.AddCommand(unloadCmd)
