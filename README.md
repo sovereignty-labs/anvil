@@ -1,298 +1,313 @@
 # nollama
 
-offical repo for the nollama project
-
-# nollama
-
 **The model runner Ollama should have been.**
 
-nollama is a transparent wrapper for [llama-server](https://github.com/ggerganov/llama.cpp) by Georgi Gerganov. It manages llama-server processes with smart defaults, keeps your models as plain GGUF files, and gives you a single pane of glass across every GPU in your fleet. Zero inference overhead. Zero opinions about your models. Zero cloud.
+One Go binary. Plain GGUFs. Transparent llama-server under the hood. Federation across your fleet.
+
+## Quickstart
 
 ```bash
-nollama runtime install                              # download llama-server
-nollama pull unsloth/gemma-4-26B-A4B-it-GGUF:Q3_K_XL # grab a model from HuggingFace
-nollama load gemma-4-26B-A4B-it-Q3_K_XL.gguf         # running. done.
-```
+# Install nollama
+curl -fsSL https://github.com/kit-porath/nollama/releases/download/v0.1.0/nollama-linux-amd64 \
+  -o /usr/local/bin/nollama && chmod +x /usr/local/bin/nollama
 
----
-
-## Why
-
-Ollama made local LLMs accessible. Then it kept going — blob stores, proprietary Modelfiles, a hardcoded template list that ignores the Jinja templates already embedded in your GGUFs, a forked backend that benchmarks 30-50% slower than upstream, a cloud pivot, and a closed-source desktop app. All on VC money.
-
-The local inference community doesn't need a platform. It needs a tool.
-
-nollama is that tool. It wraps llama-server the way it should have been wrapped from the start: transparently, with every flag visible, every file where you left it, and nothing between you and full llama.cpp performance.
-
----
-
-## What nollama does
-
-**Manages llama-server processes.** Load and unload models with one command. nollama reads the GGUF header, detects your hardware, computes smart defaults, and spawns llama-server with the right flags. Use `--dry-run` to see exactly what it would pass — nothing is hidden.
-
-**Keeps models as plain files.** Your GGUFs live in a directory. You can `ls` them, `cp` them, `rsync` them to another machine, and open them with any GGUF-compatible tool. No blob store. No hashed filenames. No lock-in.
-
-**Pulls from HuggingFace directly.** `nollama pull org/repo:quant` downloads the GGUF and saves it with its original filename. No proprietary registry. No intermediary format.
-
-**Reads the GGUF, doesn't replace it.** Chat templates, context length, architecture metadata — it's all embedded in the file. nollama passes `--jinja` and lets llama-server handle it. No hardcoded template list. No Modelfile. No Go-template-to-Jinja translation layer.
-
-**Supports every quantization llama.cpp supports.** Q2 through Q8, all IQ formats, BF16, F16, F32. If llama-server can load it, nollama can serve it.
-
-**Routes requests across loaded models.** One OpenAI-compatible endpoint per node. Multiple models loaded simultaneously. Requests route by model name. Pure HTTP reverse proxy on the hot path — nollama adds zero inference overhead.
-
-**Manages the llama-server binary for you.** `nollama runtime install` downloads pre-built releases. `nollama runtime build` compiles from source — including forks like [TheTom's TurboQuant](https://github.com/TheTom/llama-cpp-turboquant) or [ik_llama.cpp](https://github.com/ikawrakow/ik_llama.cpp). Multiple runtimes coexist. Per-model runtime selection with `--runtime`.
-
-**Federates across your fleet.** Register remote nodes. Run `nollama status` from any terminal and see every GPU, every model, every endpoint across every machine. Swap models on remote nodes without SSH. No auto-routing, no heuristics — you're the orchestrator.
-
-**Exposes fleet management via MCP.** AI agents can check fleet status, load models, pull GGUFs, and manage inference resources programmatically. Control plane only — inference goes through the standard OpenAI-compatible endpoint.
-
----
-
-## Quick Start
-
-### Install nollama
-
-```bash
-# From source (requires Go 1.22+)
-go install github.com/hirdforge/nollama/cmd/nollama@latest
-
-# Or download a release binary
-curl -sSL https://github.com/hirdforge/nollama/releases/latest/download/nollama-linux-amd64 -o nollama
-chmod +x nollama && sudo mv nollama /usr/local/bin/
-```
-
-### Install llama-server
-
-```bash
-# Auto-detects your platform and GPU
+# Download a llama.cpp release binary (auto-detects your platform + GPU)
 nollama runtime install
-```
 
-### Pull and run a model
+# Pull a model from HuggingFace
+nollama pull unsloth/Qwen3-8B-GGUF:Q4_K_M
 
-```bash
-nollama pull unsloth/Qwen3.6-35B-A3B-GGUF:Q4_K_S
+# Load it (smart defaults from GGUF metadata + your hardware)
 nollama serve &
-nollama load Qwen3.6-35B-A3B-Q4_K_S.gguf
+nollama load Qwen3-8B-Q4_K_M.gguf
+
+# You're running inference
+curl http://localhost:11434/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{"model":"Qwen3-8B-Q4_K_M","messages":[{"role":"user","content":"Hello"}]}'
 ```
 
-Your model is now serving at `http://localhost:11434/v1/chat/completions`. Point Open WebUI, Continue, or any OpenAI-compatible client at it.
+Three commands from zero to inference. No compilation. No Docker. No account.
 
----
+## What This Is
 
-## Usage
+nollama is a process manager for [llama-server](https://github.com/ggerganov/llama.cpp) (llama.cpp's built-in HTTP server). It handles the tedious parts — downloading the right binary for your hardware, computing optimal flags from GGUF metadata, managing multiple models across multiple GPUs, routing requests — while staying completely out of the inference path.
 
-### Inspect a model
+When you send a prompt to nollama, it proxies the HTTP request to the right llama-server process. That's it. Pure reverse proxy. Zero overhead on the hot path. Every token is generated by llama.cpp, unmodified.
 
-See what nollama knows about a GGUF before loading it:
+## What This Is Not
 
-```bash
-$ nollama inspect gemma-4-26B-A4B-Q3_K_XL.gguf
+nollama is not a platform. It does not have a cloud offering. It does not have a model registry. It does not have a blob store. It will never have any of these things.
 
-  Model:     gemma-4-26B-A4B-Q3_K_XL
-  Arch:      Gemma4 (MoE, 26B total, 4B active)
-  Quant:     Q3_K_XL
-  Size:      12.1 GB
-  Context:   131,072 (embedded)
-  Template:  Jinja ✓ (embedded in GGUF)
+If you want a GUI, point [Open WebUI](https://github.com/open-webui/open-webui) at nollama's endpoint. If you want cloud fallback, use [LiteLLM](https://github.com/BerriAI/litellm). If you want a platform, build one on top — nollama exposes a standard OpenAI-compatible API.
 
-  Available hardware:
-    GPU 0: RTX Pro 4000 Blackwell — 24,576 MiB (23,100 free)
-    GPU 1: RTX 5060 Ti           — 16,384 MiB (16,000 free)
-    CPU:   96 GB RAM, 24 threads
+## Why Not Ollama
 
-  Recommendation: GPU 0 (18.3 GB estimated, fits with 4.7 GB headroom)
-```
-
-### Load with control
-
-```bash
-# Auto-detect best GPU
-nollama load model.gguf
-
-# Explicit GPU
-nollama load model.gguf --gpu 0
-
-# CPU inference
-nollama load model.gguf --cpu
-
-# See exactly what flags would be passed (nothing hidden)
-nollama load model.gguf --dry-run
-
-# Override any llama-server flag
-nollama load model.gguf -- --ctx-size 131072 --parallel 4 --cache-type-k q8_0
-
-# Use a specific runtime (fork)
-nollama load model.gguf --runtime turboquant
-```
-
-### Fleet status
-
-```bash
-$ nollama status
-
-NODE      GPU              MODEL                         VRAM         ENDPOINT             UPTIME
-agent-host     RTX Pro 4000 24G gemma-4-26B-A4B-Q3_K_XL      18.2/24.0GB  http://agent-host:11434   3d 14h
-agent-host     5060 Ti 16GB     gemma-4-26B-A4B-Q5_K_S       14.1/16.0GB  http://agent-host:11435   3d 14h
-gpu-host      RTX 3090 24GB    Qwen3.6-35B-A3B-Q4_K_S       23.2/24.0GB  http://gpu-host:11434    1d 2h
-
-MODELS: 8 files, 142GB (/mnt/models/)
-NODES:  2 online
-```
-
-### Multiple runtimes
-
-Run different models on different llama.cpp forks simultaneously:
-
-```bash
-# Install mainline
-nollama runtime install
-
-# Build TheTom's TurboQuant fork
-nollama runtime build --repo https://github.com/TheTom/llama-cpp-turboquant \
-                      --branch feature/turboquant-kv-cache \
-                      --name turboquant
-
-# Standard models use mainline, TurboQuant models use the fork
-nollama load standard-model.gguf
-nollama load turbo-model.gguf --runtime turboquant
-```
-
-### Federation
-
-```bash
-# Register remote nodes
-nollama remote add gpu-host http://gpu-host.example.internal:11434
-nollama remote add inference-host http://inference-host.example.internal:11434
-
-# Manage models across your fleet
-nollama load model.gguf --node gpu-host
-nollama pull org/model:quant --node inference-host
-nollama status  # shows all nodes
-```
-
-### Hardware profiles
-
-Known-good flag combinations, community-contributed:
-
-```bash
-# Asymmetric TurboQuant (K@q8, V@turbo3 — preserves retrieval at 131K+ context)
-nollama load model.gguf --profile turboquant-asymmetric
-
-# Maximum agent slots
-nollama load model.gguf --profile agent-fleet
-
-# Stack profiles
-nollama load model.gguf --profile turboquant-asymmetric --profile agent-fleet
-```
-
-### Config file
-
-Optional. Define what to autoload on startup:
-
-```yaml
-# /etc/nollama/config.yaml
-model_dir: /mnt/models/gguf
-bind: 0.0.0.0:11434
-
-autoload:
-  - model: gemma-4-26B-A4B-Q3_K_XL.gguf
-    gpu: 0
-    runtime: turboquant
-    flags:
-      ctx-size: 131072
-      parallel: 8
-      cache-type-k: q8_0
-      cache-type-v: turbo3
-
-  - model: Qwen3.6-35B-A3B-Q4_K_S.gguf
-    gpu: 1
-```
-
-```bash
-nollama serve --config /etc/nollama/config.yaml
-```
-
----
-
-## Commitments
-
-nollama will never:
-
-- **Store models in hashed blob directories.** Your GGUFs are files in a folder. Period.
-- **Require a proprietary configuration format.** No Modelfile. CLI flags and an optional YAML config.
-- **Offer cloud-hosted inference.** Local only. Forever.
-- **Hide which flags are being passed.** `--dry-run` shows everything. Transparency is the feature.
-- **Silently override GGUF-embedded metadata.** The GGUF has a chat template. llama-server reads it. We don't re-implement it.
-- **Gate quantization formats behind an allow-list.** If llama-server supports it, nollama supports it.
-- **Take VC money.** This project exists to serve its users, not investors.
-
----
-
-## How it works
-
-nollama is a lifecycle manager and traffic cop. It does not do inference. llama-server does all the real work, untouched, as a child process.
-
-```
-                    ┌──────────────────────────┐
-                    │      nollama serve       │
-                    │                          │
-   Requests ──────►│  ┌────────┐ ┌────────┐   │
-   (OpenAI API)    │  │llama-  │ │llama-  │   │
-                   │  │server  │ │server  │   │
-                   │  │model-a │ │model-b │   │
-                   │  │GPU 0   │ │GPU 1   │   │
-                   │  └────────┘ └────────┘   │
-                    └──────────────────────────┘
-```
-
-When you `nollama load model.gguf`:
-
-1. nollama reads the GGUF header (architecture, quant, context length, template)
-2. nollama inventories your hardware (GPUs, VRAM, CPU, RAM)
-3. nollama computes the right llama-server flags
-4. nollama spawns llama-server as a child process
-5. nollama proxies requests to it
-
-You can see every flag with `--dry-run`. You can override any flag with `--`. nollama never touches the inference path.
-
----
-
-## vs Ollama
+Ollama wraps the same engine (llama.cpp) but inserts itself between you and your models in ways that cost performance, flexibility, and transparency:
 
 | | Ollama | nollama |
 |---|---|---|
-| Model storage | Hashed blob store | Plain GGUF files |
-| Chat templates | Hardcoded list, Go template syntax | Reads GGUF-embedded Jinja via llama-server |
-| Config format | Modelfile (proprietary) | CLI flags + optional YAML |
-| Inference engine | Forked ggml (custom, slower) | Stock llama-server (unmodified) |
-| Performance | 30-50% overhead vs llama.cpp | 0% overhead (pure proxy) |
-| Quantizations | 5 types | All (inherits llama-server) |
-| Multi-node | No | Federation built-in |
-| Fork support | No | Per-model runtime selection |
-| Cloud | Yes (pivot in progress) | Never |
-| Flag visibility | Hidden | `--dry-run` shows everything |
-| Funding | Y Combinator (VC) | None |
+| **Model storage** | Proprietary blob store with hashed filenames | Plain GGUFs in a directory. `ls` works. |
+| **Config format** | Modelfile (reimplements what GGUF already contains) | Read the GGUF. Use CLI flags. No Modelfile. |
+| **Chat templates** | Hardcoded list of known templates | `--jinja` flag → llama-server reads the GGUF-embedded template |
+| **Inference overhead** | 30-50% slower (community benchmarks) | 0%. Pure HTTP proxy. llama-server does the work. |
+| **Quantization** | 5 types | All of them. llama-server supports everything. |
+| **Multi-GPU** | No | Per-model GPU assignment with VRAM-aware defaults |
+| **Multi-node** | No | Federation — manage models across machines from any terminal |
+| **Fork support** | No | Run TurboQuant, ik_llama, or any llama-server fork per-model |
+| **Flag transparency** | Hidden | `--dry-run` shows every flag. `--` passes anything through. |
+| **Cloud inference** | Yes (pivot in progress) | Never. Local only. It's in the mission statement. |
+| **Funding** | Y Combinator | None. Never. |
 
----
+## Popular Models
 
-## Contributing
+```bash
+# Qwen 3 — strong general-purpose, MoE architecture
+nollama pull unsloth/Qwen3-8B-GGUF:Q4_K_M
+nollama pull unsloth/Qwen3-30B-A3B-GGUF:Q4_K_M
 
-nollama is MIT licensed and contributions are welcome.
+# Gemma 4 — Google's latest, MoE
+nollama pull bartowski/gemma-4-12b-it-GGUF:Q4_K_M
+nollama pull bartowski/gemma-4-27b-it-GGUF:Q4_K_M
 
-**Hardware profiles** are the easiest way to contribute — if you've found a good flag combination for your GPU + model setup, submit it as a YAML file in `profiles/`.
+# Llama 4 — Meta
+nollama pull unsloth/Llama-4-Scout-17B-16E-Instruct-GGUF:Q4_K_M
 
-**Bug reports** with real hardware details (GPU model, GGUF file, expected vs actual behavior) are extremely valuable.
+# DeepSeek R1 — reasoning (the distilled versions, honestly labeled)
+nollama pull bartowski/DeepSeek-R1-Distill-Qwen-32B-GGUF:Q4_K_M
+```
 
-**Code contributions** should follow the core principle: nollama manages processes and proxies requests. It never touches inference. If a feature requires modifying how llama-server works, it belongs upstream in llama.cpp, not here.
+nollama downloads GGUFs directly from HuggingFace. No registry, no intermediate format. The file lands on disk with its original name.
 
----
+## Smart Defaults
+
+When you run `nollama load model.gguf`, nollama reads the GGUF header and your hardware to compute optimal flags:
+
+```bash
+$ nollama load gemma-4-27b-Q4_K_M.gguf --dry-run
+
+  Model:    gemma-4-27b-Q4_K_M.gguf (15.2 GB)
+  Arch:     Gemma4 (MoE, 27B total, 4B active)
+  Quant:    Q4_K_M
+  Template: Jinja (embedded in GGUF ✓)
+  Context:  131,072 (from GGUF metadata, fits in VRAM)
+  Target:   GPU 0 (RTX 3090, 24GB — 18.4 GB estimated)
+
+  Would run:
+    llama-server \
+      --model /models/gemma-4-27b-Q4_K_M.gguf \
+      --n-gpu-layers 99 \
+      --ctx-size 131072 \
+      --flash-attn on \
+      --jinja \
+      --host 0.0.0.0 \
+      --port 11435 \
+      --no-warmup
+
+  Override anything: nollama load model.gguf -- --ctx-size 65536 --parallel 4
+```
+
+No magic. Every decision is visible. Every flag is overridable.
+
+## Multi-GPU
+
+nollama detects your GPUs and assigns models to whichever has the most free VRAM. Override with `--gpu N`:
+
+```bash
+nollama load large-model.gguf --gpu 0     # RTX 3090, 24GB
+nollama load small-model.gguf --gpu 1     # RTX 5060 Ti, 16GB
+nollama load auxiliary.gguf --cpu          # CPU fallback
+nollama status
+
+# NODE   GPU              MODEL              VRAM         PORT
+# local  RTX 3090 24GB    large-model.gguf   22.1/24.0GB  11435
+# local  5060 Ti 16GB     small-model.gguf   14.2/16.0GB  11436
+# local  CPU (64GB)       auxiliary.gguf      —            11437
+```
+
+Same model on multiple GPUs with different configs (e.g., one for high-throughput agent fleets, one for deep-context single sessions):
+
+```yaml
+autoload:
+  - model: Qwen3-30B-A3B-Q4_K_M.gguf
+    alias: agent-fleet
+    gpu: 0
+    port: 8002
+    flags:
+      ctx-size: 131072
+      parallel: 8
+
+  - model: Qwen3-30B-A3B-Q4_K_M.gguf
+    alias: deep-context
+    gpu: 1
+    port: 8001
+    flags:
+      ctx-size: 262144
+      parallel: 1
+```
+
+## Federation
+
+Register remote nollama nodes and manage your entire fleet from any terminal:
+
+```bash
+nollama remote add gpu-host http://gpu-host.example.internal:11434
+nollama remote add inference-host http://inference-host.example.internal:11434
+
+nollama status
+# NODE   GPU              MODEL                  VRAM         PORT
+# local  RTX 3090 24GB    Qwen3-30B-Q4_K_M       22.1/24.0GB  11435
+# gpu-host   RTX 4090 24GB    gemma-4-27b-Q4_K_M     18.4/24.0GB  11434
+# inference-host   CPU (128GB)      Qwen3-30B-BF16          —            11434
+
+# Load a model on a remote node
+nollama load model.gguf --node gpu-host
+
+# Copy a model between nodes (over your LAN, not re-downloading)
+nollama cp model.gguf --to inference-host
+
+# Pull directly to a remote node
+nollama pull unsloth/Qwen3-8B-GGUF:Q4_K_M --node gpu-host
+```
+
+No orchestrator, no consensus protocol, no automatic failover. Each node is sovereign. Federation is remote control over HTTP.
+
+## Runtime Management
+
+nollama manages llama-server binaries so you never have to compile anything:
+
+```bash
+# Download the latest llama.cpp release (auto-detects platform + GPU)
+nollama runtime install
+
+# Use a fork (TurboQuant, ik_llama, etc.)
+nollama runtime add turbo /path/to/turbo-fork/llama-server
+nollama runtime use turbo
+
+# Different models on different forks simultaneously
+nollama load model-a.gguf --runtime turbo
+nollama load model-b.gguf --runtime mainline
+
+# List installed runtimes
+nollama runtime list
+# NAME         VERSION  SOURCE   ACTIVE
+# llama-b9219  b9219    release  
+# turbo        —        custom   ✓
+# mainline     —        custom   
+```
+
+## Hardware Profiles
+
+Named flag sets for common configurations:
+
+```bash
+# Built-in profiles
+nollama load model.gguf --profile agent-fleet
+nollama load model.gguf --profile turboquant-asymmetric
+
+# Profiles are stackable
+nollama load model.gguf --profile turboquant-asymmetric --profile agent-fleet
+```
+
+Profiles ship with the binary. Community profiles via PR.
+
+## MCP Server
+
+nollama exposes fleet management as [MCP](https://modelcontextprotocol.io/) tools. Any MCP-capable client (Claude Desktop, Open WebUI, custom agents) can manage your inference fleet programmatically:
+
+```bash
+nollama serve --mcp
+```
+
+Tools: `nollama_status`, `nollama_load`, `nollama_unload`, `nollama_models`, `nollama_pull`, `nollama_inspect`, `nollama_runtimes`, `nollama_rm`.
+
+Control plane only — inference requests go through the OpenAI-compatible API, not MCP.
+
+## Configuration
+
+Config is optional. nollama works with zero config. The config file pre-defines what to load on startup:
+
+```yaml
+model_dir: /models
+bind: 0.0.0.0:11434
+
+autoload:
+  - model: Qwen3-30B-A3B-Q4_K_M.gguf
+    gpu: 0
+    flags:
+      ctx-size: 131072
+      parallel: 4
+
+  - model: Qwen3-8B-Q4_K_M.gguf
+    device: cpu
+    flags:
+      ctx-size: 65536
+      threads: 12
+
+defaults:
+  flash-attn: "on"
+  no-warmup: true
+  jinja: true
+```
+
+Default locations: `~/.config/nollama/config.yaml` or `/etc/nollama/config.yaml`
+
+## Passthrough
+
+Every llama-server flag is available. nollama never hides options:
+
+```bash
+# Override anything after --
+nollama load model.gguf -- --ctx-size 262144 --parallel 8 --cache-type-k q8_0
+
+# See what would be passed without launching
+nollama load model.gguf --dry-run
+```
+
+## CLI Reference
+
+```
+nollama serve                     Start the daemon
+nollama load <model> [flags]      Load a model
+nollama unload <model>            Unload a model
+nollama status                    Fleet-wide status
+nollama models                    List available GGUFs
+nollama inspect <model>           Show GGUF metadata
+nollama pull <org/repo:quant>     Download from HuggingFace
+nollama cp <model> --to <node>    Copy model between nodes
+nollama rm <model>                Remove a model file
+nollama remote add/rm/list/ping   Manage remote nodes
+nollama runtime install/list/use  Manage llama-server binaries
+```
+
+## Install
+
+**Binary download:**
+```bash
+# Linux x86_64
+curl -fsSL https://github.com/kit-porath/nollama/releases/download/v0.1.0/nollama-linux-amd64 \
+  -o /usr/local/bin/nollama && chmod +x /usr/local/bin/nollama
+```
+
+**From source:**
+```bash
+git clone https://github.com/kit-porath/nollama.git
+cd nollama
+go build -o nollama ./cmd/nollama
+```
+
+**systemd:**
+```bash
+sudo cp nollama /usr/local/bin/
+sudo cp systemd/nollama.service /etc/systemd/system/
+sudo systemctl enable --now nollama
+```
 
 ## Attribution
 
-nollama exists because of [llama.cpp](https://github.com/ggerganov/llama.cpp), created by Georgi Gerganov and maintained by hundreds of contributors. Without their work, local LLM inference wouldn't exist. nollama manages llama-server processes and gets out of the way. The real work happens in llama.cpp.
+nollama exists because of [llama.cpp](https://github.com/ggerganov/llama.cpp), created by Georgi Gerganov and maintained by hundreds of contributors. nollama does not modify, fork, or vendor llama.cpp. It manages llama-server processes and gets out of the way. The real work happens in llama.cpp.
 
----
+[MCP](https://modelcontextprotocol.io/) (Model Context Protocol) by Anthropic.
 
 ## License
 
@@ -300,4 +315,4 @@ MIT
 
 ---
 
-*Built by [Kit Porath](https://github.com/architkit). No VC. No cloud. No blob store. Just models on your hardware.*
+*Built by [Kit Porath](https://github.com/kit-porath). No VC. No cloud. No blob store. Just models on your hardware.*
