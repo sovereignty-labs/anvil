@@ -714,3 +714,92 @@ func TestOverrideResultPortAppendsWhenMissing(t *testing.T) {
 		t.Errorf("expected --port 9090 to be appended, got %v", r.Flags)
 	}
 }
+
+func TestEnsureHostFlagDefaults(t *testing.T) {
+	got := EnsureHostFlag([]string{"--model", "/x.gguf", "--port", "11434"})
+	want := []string{"--model", "/x.gguf", "--port", "11434", "--host", "0.0.0.0"}
+	if len(got) != len(want) {
+		t.Fatalf("got %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("got %v, want %v", got, want)
+			return
+		}
+	}
+}
+
+func TestEnsureHostFlagPreservesExplicit(t *testing.T) {
+	in := []string{"--model", "/x.gguf", "--host", "203.0.113.5", "--port", "11434"}
+	got := EnsureHostFlag(in)
+	if len(got) != len(in) {
+		t.Errorf("expected no change, got %v", got)
+	}
+	for i := range in {
+		if got[i] != in[i] {
+			t.Errorf("got %v, want %v", got, in)
+			return
+		}
+	}
+	// Ensure the explicit value is still 203.0.113.5 (no duplicate appended).
+	hostIdx := -1
+	for i, f := range got {
+		if f == "--host" {
+			hostIdx = i
+			break
+		}
+	}
+	if hostIdx < 0 || got[hostIdx+1] != "203.0.113.5" {
+		t.Errorf("explicit host not preserved: %v", got)
+	}
+	for i := hostIdx + 1; i < len(got); i++ {
+		if got[i] == "--host" {
+			t.Errorf("duplicate --host appended: %v", got)
+		}
+	}
+}
+
+func TestEnsureHostFlagPassthroughPreserved(t *testing.T) {
+	// Simulates the CLI/handleLoad path: ComputeFlags writes --host 0.0.0.0,
+	// MergePassthroughFlags replaces it with the explicit passthrough,
+	// EnsureHostFlag must be a no-op.
+	computed := []string{"--model", "/x.gguf", "--host", "0.0.0.0", "--port", "11434"}
+	passthrough := []string{"--host", "127.0.0.1"}
+	merged := MergePassthroughFlags(computed, passthrough)
+	final := EnsureHostFlag(merged)
+
+	hostCount := 0
+	hostValue := ""
+	for i, f := range final {
+		if f == "--host" {
+			hostCount++
+			if i+1 < len(final) {
+				hostValue = final[i+1]
+			}
+		}
+	}
+	if hostCount != 1 {
+		t.Errorf("expected exactly one --host, got %d in %v", hostCount, final)
+	}
+	if hostValue != "127.0.0.1" {
+		t.Errorf("expected passthrough --host 127.0.0.1 to win, got %q in %v", hostValue, final)
+	}
+}
+
+func TestComputeFlagsDefaultHost(t *testing.T) {
+	meta := &model.GGUFMetadata{FileSizeBytes: 1 << 30}
+	inv := &hardware.Inventory{}
+	r, err := ComputeFlags(meta, "/x.gguf", inv, "/usr/bin/llama-server", 0)
+	if err != nil {
+		t.Fatalf("ComputeFlags: %v", err)
+	}
+	found := false
+	for i, f := range r.Flags {
+		if f == "--host" && i+1 < len(r.Flags) && r.Flags[i+1] == "0.0.0.0" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected --host 0.0.0.0 in computed flags, got %v", r.Flags)
+	}
+}
