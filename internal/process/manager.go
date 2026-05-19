@@ -235,6 +235,8 @@ func (m *Manager) Start(result *Result, modelName string, passthrough []string) 
 
 	// Merge passthrough flags on top of computed flags
 	flags := MergePassthroughFlags(result.Flags, passthrough)
+	// Default to binding all interfaces if the user hasn't set --host explicitly.
+	flags = EnsureHostFlag(flags)
 
 	// Parse the llama-server binary path from the original command
 	parts := strings.Fields(result.Command)
@@ -341,6 +343,9 @@ func (m *Manager) StartOptsStart(opts StartOpts) (int, error) {
 		}
 	}
 	flags = append(flags, "--port", fmt.Sprintf("%d", port))
+	// Default to binding all interfaces unless the autoload entry / config /
+	// profile already supplied --host via opts.ExtraFlags.
+	flags = EnsureHostFlag(flags)
 
 	// Open log file
 	logFile, err := m.openLogFile(port)

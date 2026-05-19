@@ -22,6 +22,21 @@ type Result struct {
 	Port           int      // llama-server HTTP port (11434 + modelIndex)
 }
 
+// EnsureHostFlag injects --host 0.0.0.0 into flags when no --host is already
+// present. llama-server itself defaults to 127.0.0.1, which makes spawned
+// instances unreachable from federation peers or other machines on the LAN —
+// the inverse of what nollama is for. Called on the final merged flag slice
+// (after smart defaults + config defaults + profiles + passthrough) so any
+// explicit user-supplied --host wins.
+func EnsureHostFlag(flags []string) []string {
+	for _, f := range flags {
+		if f == "--host" {
+			return flags
+		}
+	}
+	return append(flags, "--host", "0.0.0.0")
+}
+
 // OverrideResultPort rewrites the port baked into a ComputeFlags result so the
 // process is spawned on a pinned port. No-op when port <= 0. Updates both the
 // Result.Port field and the --port value inside Result.Flags.
