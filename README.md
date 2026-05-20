@@ -8,7 +8,7 @@ One Go binary. Plain GGUFs. Transparent llama-server under the hood. Federation 
 
 ```bash
 # Install nollama
-curl -fsSL https://github.com/kit-porath/nollama/releases/download/v0.1.0/nollama-linux-amd64 \
+curl -fsSL https://github.com/sovereignty-labs/nollama/releases/download/latest/nollama-linux-amd64 \
   -o /usr/local/bin/nollama && chmod +x /usr/local/bin/nollama
 
 # Download a llama.cpp release binary (auto-detects your platform + GPU)
@@ -43,21 +43,20 @@ If you want a GUI, point [Open WebUI](https://github.com/open-webui/open-webui) 
 
 ## Why Not Ollama
 
-Ollama wraps the same engine (llama.cpp) but inserts itself between you and your models in ways that cost performance, flexibility, and transparency:
+Ollama wraps the same engine (llama.cpp) but adds layers between you and your models that cost performance, flexibility, and transparency:
 
 | | Ollama | nollama |
 |---|---|---|
-| **Model storage** | Proprietary blob store with hashed filenames | Plain GGUFs in a directory. `ls` works. |
+| **Model storage** | Proprietary blob store with hashed filenames | Plain GGUFs in a directory |
 | **Config format** | Modelfile (reimplements what GGUF already contains) | Read the GGUF. Use CLI flags. No Modelfile. |
-| **Chat templates** | Hardcoded list of known templates | `--jinja` flag → llama-server reads the GGUF-embedded template |
-| **Inference overhead** | 30-50% slower (community benchmarks) | 0%. Pure HTTP proxy. llama-server does the work. |
-| **Quantization** | 5 types | All of them. llama-server supports everything. |
+| **Chat templates** | Hardcoded list of known templates | `--jinja` → llama-server reads the GGUF-embedded template |
+| **Inference overhead** | Additional processing layer over llama.cpp | Pure HTTP proxy. Zero overhead on the hot path. |
+| **Quantization** | Limited selection | All llama-server quantizations |
 | **Multi-GPU** | No | Per-model GPU assignment with VRAM-aware defaults |
 | **Multi-node** | No | Federation — manage models across machines from any terminal |
 | **Fork support** | No | Run TurboQuant, ik_llama, or any llama-server fork per-model |
 | **Flag transparency** | Hidden | `--dry-run` shows every flag. `--` passes anything through. |
-| **Cloud inference** | Yes (pivot in progress) | Never. Local only. It's in the mission statement. |
-| **Funding** | Y Combinator | None. Never. |
+| **Cloud inference** | Yes | No. Local only. |
 
 ## Popular Models
 
@@ -278,6 +277,7 @@ nollama cp <model> --to <node>    Copy model between nodes
 nollama rm <model>                Remove a model file
 nollama remote add/rm/list/ping   Manage remote nodes
 nollama runtime install/list/use  Manage llama-server binaries
+nollama version                   Show build info
 ```
 
 ## Install
@@ -285,13 +285,13 @@ nollama runtime install/list/use  Manage llama-server binaries
 **Binary download:**
 ```bash
 # Linux x86_64
-curl -fsSL https://github.com/kit-porath/nollama/releases/download/v0.1.0/nollama-linux-amd64 \
+curl -fsSL https://github.com/sovereignty-labs/nollama/releases/download/latest/nollama-linux-amd64 \
   -o /usr/local/bin/nollama && chmod +x /usr/local/bin/nollama
 ```
 
 **From source:**
 ```bash
-git clone https://github.com/kit-porath/nollama.git
+git clone https://github.com/sovereignty-labs/nollama.git
 cd nollama
 go build -o nollama ./cmd/nollama
 ```
@@ -315,4 +315,4 @@ MIT
 
 ---
 
-*Built by [Kit Porath](https://github.com/kit-porath). No VC. No cloud. No blob store. Just models on your hardware.*
+*A [Sovereignty Labs](https://github.com/sovereignty-labs) project. Own your intelligence.*
