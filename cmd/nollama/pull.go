@@ -59,7 +59,7 @@ func runPull(cmd *cobra.Command, args []string) error {
 		return fatalPull(fmt.Errorf("create model dir %s: %w", modelDir, err))
 	}
 
-	token := os.Getenv("HF_TOKEN")
+	token := resolveHFToken()
 
 	fmt.Fprintf(os.Stderr, "Fetching file list from %s/%s...\n", parsed.Org, parsed.Repo)
 	files, err := pull.ListGGUFs(parsed.Org, parsed.Repo, token)
