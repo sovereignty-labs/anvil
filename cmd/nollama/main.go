@@ -875,6 +875,7 @@ func init() {
 	rootCmd.AddCommand(versionCmd)
 	rootCmd.AddCommand(serveCmd)
 	rootCmd.AddCommand(loadCmd)
+	rootCmd.AddCommand(runModelCmd)
 	rootCmd.AddCommand(unloadCmd)
 	rootCmd.AddCommand(statusCmd)
 	rootCmd.AddCommand(modelsCmd)
