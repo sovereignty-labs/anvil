@@ -246,7 +246,10 @@ var cpCmd = &cobra.Command{
 
 // runLoad handles the load command — parses GGUF, detects hardware, computes flags.
 func runLoad(cmd *cobra.Command, args []string) error {
-	modelPath := args[0]
+	modelPath, err := resolveModelPath(args[0])
+	if err != nil {
+		return err
+	}
 	cfg, err := loadCLIConfig()
 	if err != nil {
 		return err
@@ -651,6 +654,12 @@ func runCP(cmd *cobra.Command, args []string) error {
 
 func runRM(cmd *cobra.Command, args []string) error {
 	target := args[0]
+	// Best-effort: when the user typed a bare name (with or without .gguf) and
+	// the model exists in a known dir, normalize to the canonical basename so
+	// FuzzyMatchModel matches exactly. Failures fall back to the raw arg.
+	if resolved, err := resolveModelPath(target); err == nil {
+		target = filepath.Base(resolved)
+	}
 
 	if client, err := resolveNodeClient(cmd); err != nil {
 		return err
