@@ -167,12 +167,10 @@ var runtimeInstallCmd = &cobra.Command{
 	RunE:  runRuntimeInstall,
 }
 
+// runtimeBuildCmd is wired up in cmd/nollama/runtime.go's init so its
+// flags + RunE live next to the other runtime subcommands.
 var runtimeBuildCmd = &cobra.Command{
-	Use:   "build",
-	Short: "Compile llama-server from source (including forks)",
-	RunE: func(cmd *cobra.Command, args []string) error {
-		return fmt.Errorf("not implemented yet — coming in S2+")
-	},
+	Use: "build",
 }
 
 var runtimeListCmd = &cobra.Command{

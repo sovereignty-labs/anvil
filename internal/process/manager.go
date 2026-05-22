@@ -142,18 +142,30 @@ func (m *Manager) openLogFile(port int) (*os.File, error) {
 }
 
 // buildChildEnv returns the environment for a spawned llama-server process,
-// isolating it to a specific GPU (or hiding all GPUs in CPU mode).
+// isolating it to a specific GPU (or hiding all GPUs in CPU mode) and
+// pointing LD_LIBRARY_PATH at the runtime directory so the bundled .so files
+// next to llama-server resolve.
 //
 // When gpuIndex >= 0 and forceCPU is false, sets CUDA_VISIBLE_DEVICES=<index>
 // so llama-server only sees that single device (it becomes its device 0).
 // In CPU mode, clears CUDA_VISIBLE_DEVICES so GPU auto-fit doesn't hang.
 // Any pre-existing CUDA_VISIBLE_DEVICES in the parent env is stripped first
 // to avoid a stale value sneaking in from the shell.
-func buildChildEnv(gpuIndex int, forceCPU bool) []string {
+//
+// LD_LIBRARY_PATH is prepended with filepath.Dir(llamaServerPath) so the
+// release tarball's libllama-common.so / libllama.so / libggml*.so resolve
+// without needing a system-wide install. Empty llamaServerPath skips that.
+func buildChildEnv(gpuIndex int, forceCPU bool, llamaServerPath string) []string {
 	parent := os.Environ()
-	filtered := make([]string, 0, len(parent)+1)
+	filtered := make([]string, 0, len(parent)+2)
+	existingLDP := ""
 	for _, e := range parent {
-		if !strings.HasPrefix(e, "CUDA_VISIBLE_DEVICES=") {
+		switch {
+		case strings.HasPrefix(e, "CUDA_VISIBLE_DEVICES="):
+			// drop — we set our own below
+		case strings.HasPrefix(e, "LD_LIBRARY_PATH="):
+			existingLDP = strings.TrimPrefix(e, "LD_LIBRARY_PATH=")
+		default:
 			filtered = append(filtered, e)
 		}
 	}
@@ -162,6 +174,17 @@ func buildChildEnv(gpuIndex int, forceCPU bool) []string {
 		filtered = append(filtered, "CUDA_VISIBLE_DEVICES=")
 	case gpuIndex >= 0:
 		filtered = append(filtered, fmt.Sprintf("CUDA_VISIBLE_DEVICES=%d", gpuIndex))
+	}
+	if llamaServerPath != "" {
+		runtimeDir := filepath.Dir(llamaServerPath)
+		if existingLDP != "" {
+			filtered = append(filtered, fmt.Sprintf("LD_LIBRARY_PATH=%s:%s", runtimeDir, existingLDP))
+		} else {
+			filtered = append(filtered, fmt.Sprintf("LD_LIBRARY_PATH=%s", runtimeDir))
+		}
+	} else if existingLDP != "" {
+		// Preserve the parent's LD_LIBRARY_PATH when we have nothing to prepend.
+		filtered = append(filtered, "LD_LIBRARY_PATH="+existingLDP)
 	}
 	return filtered
 }
@@ -275,7 +298,7 @@ func (m *Manager) Start(result *Result, modelName string, passthrough []string) 
 	// Isolate the spawned process to its assigned GPU (or hide all GPUs in CPU
 	// mode) so two llama-servers can't spread across the same device. With
 	// CUDA_VISIBLE_DEVICES=N, llama-server sees a single device as its index 0.
-	cmd.Env = buildChildEnv(parseCUDADeviceIndex(result.SelectedDevice), result.CPUFallback)
+	cmd.Env = buildChildEnv(parseCUDADeviceIndex(result.SelectedDevice), result.CPUFallback, llamaServerPath)
 
 	// Start the process
 	if err := cmd.Start(); err != nil {
@@ -365,7 +388,7 @@ func (m *Manager) StartOptsStart(opts StartOpts) (int, error) {
 	if opts.ForceCPU {
 		gpuForEnv = -1
 	}
-	cmd.Env = buildChildEnv(gpuForEnv, opts.ForceCPU)
+	cmd.Env = buildChildEnv(gpuForEnv, opts.ForceCPU, opts.LlamaServer)
 
 	modelName := filepath.Base(opts.ModelPath)
 

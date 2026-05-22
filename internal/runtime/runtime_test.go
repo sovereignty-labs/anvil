@@ -1,7 +1,10 @@
 package runtime
 
 import (
+	"archive/tar"
+	"archive/zip"
 	"bytes"
+	"compress/gzip"
 	"os"
 	"path/filepath"
 	"strings"
@@ -181,5 +184,163 @@ func TestHomeRuntimesDirEmptyWhenHOMEUnset(t *testing.T) {
 	}
 	if !strings.Contains(sink.String(), "HOME not set") {
 		t.Errorf("expected stderr warning, got %q", sink.String())
+	}
+}
+
+func TestStripTopDir(t *testing.T) {
+	cases := map[string]string{
+		"llama-b9275/llama-server":          "llama-server",
+		"llama-b9275/lib/libfoo.so":         "lib/libfoo.so",
+		"foo":                               "foo",
+		"/llama-b9275/llama-server":         "llama-server",
+		"":                                  "",
+	}
+	for in, want := range cases {
+		if got := stripTopDir(in); got != want {
+			t.Errorf("stripTopDir(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+func TestExtractRuntimeFromTarGzFlattensAndExtractsAll(t *testing.T) {
+	dir := t.TempDir()
+	archivePath := filepath.Join(dir, "llama.tar.gz")
+
+	// Build a tarball wrapping every file under llama-b9275/.
+	files := map[string][]byte{
+		"llama-b9275/llama-server":         []byte("BINARY"),
+		"llama-b9275/libllama.so":          []byte("LIB1"),
+		"llama-b9275/libllama-common.so.0": []byte("LIB2"),
+		"llama-b9275/README.md":            []byte("readme"),
+	}
+	writeTarGz(t, archivePath, files)
+
+	outDir := filepath.Join(dir, "out")
+	if err := extractRuntime(archivePath, outDir); err != nil {
+		t.Fatalf("extractRuntime: %v", err)
+	}
+	for _, name := range []string{"llama-server", "libllama.so", "libllama-common.so.0", "README.md"} {
+		path := filepath.Join(outDir, name)
+		if _, err := os.Stat(path); err != nil {
+			t.Errorf("expected %s in output dir: %v", name, err)
+		}
+	}
+	data, err := os.ReadFile(filepath.Join(outDir, "llama-server"))
+	if err != nil || string(data) != "BINARY" {
+		t.Errorf("llama-server content mismatch: %v / %q", err, data)
+	}
+}
+
+func TestExtractRuntimeFromZipFlattensAndExtractsAll(t *testing.T) {
+	dir := t.TempDir()
+	archivePath := filepath.Join(dir, "llama.zip")
+	files := map[string][]byte{
+		"llama-b9275/llama-server": []byte("BINARY"),
+		"llama-b9275/libfoo.so":    []byte("LIB"),
+	}
+	writeZip(t, archivePath, files)
+
+	outDir := filepath.Join(dir, "out")
+	if err := extractRuntime(archivePath, outDir); err != nil {
+		t.Fatalf("extractRuntime: %v", err)
+	}
+	for _, name := range []string{"llama-server", "libfoo.so"} {
+		if _, err := os.Stat(filepath.Join(outDir, name)); err != nil {
+			t.Errorf("expected %s in output dir: %v", name, err)
+		}
+	}
+}
+
+func TestSelectAssetWarnsWhenNoCUDABuild(t *testing.T) {
+	var sink bytes.Buffer
+	stderrWriter = &sink
+	t.Cleanup(func() { stderrWriter = os.Stderr })
+
+	platform := Platform{OS: "linux", Arch: "amd64", CUDA: "available"}
+	assets := []ReleaseAsset{
+		{Name: "llama-b9275-bin-ubuntu-x64.tar.gz"},
+	}
+	if _, err := SelectAsset(assets, platform); err != nil {
+		t.Fatalf("SelectAsset: %v", err)
+	}
+	if !strings.Contains(sink.String(), "CUDA detected but no CUDA build") {
+		t.Errorf("expected CUDA warning, got %q", sink.String())
+	}
+	if !strings.Contains(sink.String(), "nollama runtime build") {
+		t.Errorf("expected hint to runtime build, got %q", sink.String())
+	}
+}
+
+func TestDeriveBuildRuntimeName(t *testing.T) {
+	cases := []struct {
+		repo, branch, want string
+	}{
+		{"https://github.com/ggml-org/llama.cpp.git", "", "llama-build"},
+		{"https://github.com/ggml-org/llama.cpp.git", "master", "llama-build-master"},
+		{"https://github.com/ikawrakow/ik_llama.cpp.git", "", "ik_llama.cpp"},
+		{"https://github.com/turboquant/turboquant.git", "v2", "turboquant-v2"},
+		{"https://github.com/ggerganov/llama.cpp.git", "experiment/foo", "llama-build-experiment-foo"},
+	}
+	for _, c := range cases {
+		if got := deriveBuildRuntimeName(c.repo, c.branch); got != c.want {
+			t.Errorf("deriveBuildRuntimeName(%q, %q) = %q, want %q", c.repo, c.branch, got, c.want)
+		}
+	}
+}
+
+// writeTarGz creates a minimal tar.gz containing the given files.
+func writeTarGz(t *testing.T, path string, files map[string][]byte) {
+	t.Helper()
+	f, err := os.Create(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	gz := gzip.NewWriter(f)
+	tw := tar.NewWriter(gz)
+	for name, data := range files {
+		hdr := &tar.Header{
+			Name: name,
+			Mode: 0o644,
+			Size: int64(len(data)),
+		}
+		if err := tw.WriteHeader(hdr); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := tw.Write(data); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := tw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := gz.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func writeZip(t *testing.T, path string, files map[string][]byte) {
+	t.Helper()
+	f, err := os.Create(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	zw := zip.NewWriter(f)
+	for name, data := range files {
+		w, err := zw.Create(name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := w.Write(data); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := zw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatal(err)
 	}
 }

@@ -206,14 +206,19 @@ func (m *Manager) Install(version string) (*RuntimeInfo, error) {
 		return nil, err
 	}
 
-	fmt.Fprintln(os.Stderr, "\nExtracting llama-server...")
-	binaryPath := filepath.Join(workDir, runtimeBinaryName())
-	if err := extractLlamaServer(archivePath, binaryPath); err != nil {
+	fmt.Fprintln(os.Stderr, "\nExtracting runtime...")
+	if err := extractRuntime(archivePath, workDir); err != nil {
 		return nil, err
 	}
-	if err := os.Chmod(binaryPath, 0o755); err != nil {
-		return nil, fmt.Errorf("chmod llama-server: %w", err)
+	binaryPath := filepath.Join(workDir, runtimeBinaryName())
+	if _, err := os.Stat(binaryPath); err != nil {
+		return nil, fmt.Errorf("llama-server missing from extracted archive %s: %w", asset.Name, err)
 	}
+	if err := chmodRuntimeArtifacts(workDir); err != nil {
+		return nil, err
+	}
+	// Archive is no longer needed; reclaim the disk.
+	_ = os.Remove(archivePath)
 	if err := writeSourceMarker(workDir, "release"); err != nil {
 		return nil, err
 	}
@@ -235,6 +240,136 @@ func (m *Manager) Install(version string) (*RuntimeInfo, error) {
 		Path:    filepath.Join(finalDir, runtimeBinaryName()),
 		Version: versionFromRuntimeName(runtimeName),
 		Source:  "release",
+		Active:  true,
+	}
+	fmt.Fprintf(os.Stderr, "Installed: %s\n", info.Path)
+	fmt.Fprintf(os.Stderr, "Active runtime: %s ✓\n", info.Name)
+	return &info, nil
+}
+
+// BuildOpts configures a from-source runtime build.
+type BuildOpts struct {
+	Repo   string // git URL (default: github.com/ggml-org/llama.cpp)
+	Branch string // optional branch / tag to checkout
+	Name   string // runtime name (default: derived from repo)
+}
+
+// Build clones llama.cpp (or a fork), runs cmake + cmake --build, then copies
+// llama-server and its shared libraries into a new runtime directory and
+// marks the runtime active.
+func (m *Manager) Build(opts BuildOpts) (*RuntimeInfo, error) {
+	if err := m.ensureDir(); err != nil {
+		return nil, fmt.Errorf("prepare runtimes dir: %w", err)
+	}
+
+	repo := strings.TrimSpace(opts.Repo)
+	if repo == "" {
+		repo = defaultBuildRepo
+	}
+	name := strings.TrimSpace(opts.Name)
+	if name == "" {
+		name = deriveBuildRuntimeName(repo, opts.Branch)
+	}
+	if err := validateRuntimeName(name); err != nil {
+		return nil, err
+	}
+
+	platform := DetectPlatform()
+	tools, err := checkBuildTools(platform)
+	if err != nil {
+		return nil, err
+	}
+	printBuildTools(tools)
+
+	srcDir, err := os.MkdirTemp("", "nollama-build-")
+	if err != nil {
+		return nil, fmt.Errorf("create build temp dir: %w", err)
+	}
+	defer os.RemoveAll(srcDir)
+
+	cloneArgs := []string{"clone", "--depth", "1"}
+	if b := strings.TrimSpace(opts.Branch); b != "" {
+		cloneArgs = append(cloneArgs, "--branch", b)
+	}
+	cloneArgs = append(cloneArgs, repo, srcDir)
+	fmt.Fprintf(os.Stderr, "\nCloning %s...\n", repo)
+	if err := runBuildCmd(srcDir, "git", cloneArgs...); err != nil {
+		return nil, fmt.Errorf("git clone: %w", err)
+	}
+
+	cmakeArgs := []string{
+		"-B", "build",
+		"-DBUILD_SHARED_LIBS=ON",
+		"-DLLAMA_BUILD_TESTS=OFF",
+		"-DLLAMA_BUILD_EXAMPLES=OFF",
+		"-DLLAMA_BUILD_SERVER=ON",
+	}
+	if platform.CUDA != "" && tools.nvcc != "" {
+		cmakeArgs = append(cmakeArgs, "-DGGML_CUDA=ON")
+	}
+	fmt.Fprintf(os.Stderr, "\nConfiguring: cmake %s\n", strings.Join(cmakeArgs, " "))
+	if err := runBuildCmd(srcDir, "cmake", cmakeArgs...); err != nil {
+		return nil, fmt.Errorf("cmake configure: %w", err)
+	}
+
+	jobs := fmt.Sprintf("%d", stdruntime.NumCPU())
+	fmt.Fprintf(os.Stderr, "\nBuilding (-j%s)...\n", jobs)
+	if err := runBuildCmd(srcDir, "cmake", "--build", "build", "--config", "Release", "-j", jobs); err != nil {
+		return nil, fmt.Errorf("cmake build: %w", err)
+	}
+
+	binarySrc, libs, err := findBuildArtifacts(filepath.Join(srcDir, "build"))
+	if err != nil {
+		return nil, err
+	}
+
+	finalDir, err := m.runtimeDir(name)
+	if err != nil {
+		return nil, err
+	}
+	workDir, err := os.MkdirTemp(m.runtimesDir, "."+name+".")
+	if err != nil {
+		return nil, fmt.Errorf("create temp runtime dir: %w", err)
+	}
+	cleanup := true
+	defer func() {
+		if cleanup {
+			_ = os.RemoveAll(workDir)
+		}
+	}()
+
+	if err := copyFile(binarySrc, filepath.Join(workDir, runtimeBinaryName())); err != nil {
+		return nil, err
+	}
+	for _, lib := range libs {
+		if err := copyFile(lib, filepath.Join(workDir, filepath.Base(lib))); err != nil {
+			return nil, err
+		}
+	}
+	if err := chmodRuntimeArtifacts(workDir); err != nil {
+		return nil, err
+	}
+	if err := writeSourceMarker(workDir, "build"); err != nil {
+		return nil, err
+	}
+
+	if err := os.RemoveAll(finalDir); err != nil {
+		return nil, fmt.Errorf("remove existing runtime %s: %w", finalDir, err)
+	}
+	if err := os.Rename(workDir, finalDir); err != nil {
+		return nil, fmt.Errorf("finalize build runtime: %w", err)
+	}
+	cleanup = false
+
+	if err := m.Use(name); err != nil {
+		return nil, err
+	}
+
+	info := RuntimeInfo{
+		Name:    name,
+		Path:    filepath.Join(finalDir, runtimeBinaryName()),
+		Version: "",
+		Source:  "build",
 		Active:  true,
 	}
 	fmt.Fprintf(os.Stderr, "Installed: %s\n", info.Path)
@@ -650,53 +785,76 @@ func humanRate(rate float64) string {
 	}
 }
 
-func extractLlamaServer(archivePath, destPath string) error {
+// extractRuntime extracts every regular file from the archive into destDir,
+// flattening one level of top-level directory nesting (llama.cpp release
+// tarballs wrap everything under llama-b9275/). On success, llama-server and
+// every shared library land next to each other so the dynamic linker can
+// find them via LD_LIBRARY_PATH=<destDir>.
+func extractRuntime(archivePath, destDir string) error {
 	lower := strings.ToLower(archivePath)
 	switch {
 	case strings.HasSuffix(lower, ".zip"):
-		return extractLlamaServerFromZip(archivePath, destPath)
+		return extractRuntimeFromZip(archivePath, destDir)
 	case strings.HasSuffix(lower, ".tar.gz"):
-		return extractLlamaServerFromTarGz(archivePath, destPath)
+		return extractRuntimeFromTarGz(archivePath, destDir)
 	default:
 		return fmt.Errorf("unsupported archive format: %s", archivePath)
 	}
 }
 
-func extractLlamaServerFromZip(archivePath, destPath string) error {
+// stripTopDir removes the first path component from name. "llama-b9275/foo/bar"
+// → "foo/bar"; "foo" → "foo" (no top-level dir to strip).
+func stripTopDir(name string) string {
+	name = strings.TrimLeft(name, "/")
+	idx := strings.Index(name, "/")
+	if idx < 0 {
+		return name
+	}
+	return name[idx+1:]
+}
+
+func extractRuntimeFromZip(archivePath, destDir string) error {
 	r, err := zip.OpenReader(archivePath)
 	if err != nil {
 		return fmt.Errorf("open zip archive %s: %w", archivePath, err)
 	}
 	defer r.Close()
 
-	targets := binaryCandidates()
-	var found []string
+	if err := os.MkdirAll(destDir, 0o755); err != nil {
+		return fmt.Errorf("create extraction dir: %w", err)
+	}
+
+	count := 0
 	for _, file := range r.File {
-		name := filepath.Base(file.Name)
 		if file.FileInfo().IsDir() {
 			continue
 		}
-		found = append(found, name)
-		if !matchesAny(name, targets) {
+		stripped := stripTopDir(file.Name)
+		if stripped == "" || strings.Contains(stripped, "..") {
 			continue
 		}
-
+		outPath := filepath.Join(destDir, filepath.Base(stripped))
+		if err := os.MkdirAll(filepath.Dir(outPath), 0o755); err != nil {
+			return fmt.Errorf("create dir for %s: %w", outPath, err)
+		}
 		rc, err := file.Open()
 		if err != nil {
 			return fmt.Errorf("open %s in archive: %w", file.Name, err)
 		}
-		defer rc.Close()
-
-		if err := writeArchiveEntry(destPath, rc); err != nil {
+		if err := writeArchiveEntry(outPath, rc); err != nil {
+			rc.Close()
 			return err
 		}
-		return nil
+		rc.Close()
+		count++
 	}
-
-	return fmt.Errorf("llama-server not found in %s; found: %s", archivePath, strings.Join(found, ", "))
+	if count == 0 {
+		return fmt.Errorf("no files extracted from %s", archivePath)
+	}
+	return nil
 }
 
-func extractLlamaServerFromTarGz(archivePath, destPath string) error {
+func extractRuntimeFromTarGz(archivePath, destDir string) error {
 	f, err := os.Open(archivePath)
 	if err != nil {
 		return fmt.Errorf("open tar.gz archive %s: %w", archivePath, err)
@@ -709,10 +867,12 @@ func extractLlamaServerFromTarGz(archivePath, destPath string) error {
 	}
 	defer gzr.Close()
 
-	tr := tar.NewReader(gzr)
-	targets := binaryCandidates()
-	var found []string
+	if err := os.MkdirAll(destDir, 0o755); err != nil {
+		return fmt.Errorf("create extraction dir: %w", err)
+	}
 
+	tr := tar.NewReader(gzr)
+	count := 0
 	for {
 		hdr, err := tr.Next()
 		if err == io.EOF {
@@ -721,30 +881,49 @@ func extractLlamaServerFromTarGz(archivePath, destPath string) error {
 		if err != nil {
 			return fmt.Errorf("read tar archive %s: %w", archivePath, err)
 		}
-		name := filepath.Base(hdr.Name)
 		if hdr.FileInfo().IsDir() {
 			continue
 		}
-		found = append(found, name)
-		if !matchesAny(name, targets) {
+		stripped := stripTopDir(hdr.Name)
+		if stripped == "" || strings.Contains(stripped, "..") {
 			continue
 		}
-		if err := writeArchiveEntry(destPath, tr); err != nil {
+		outPath := filepath.Join(destDir, filepath.Base(stripped))
+		if err := os.MkdirAll(filepath.Dir(outPath), 0o755); err != nil {
+			return fmt.Errorf("create dir for %s: %w", outPath, err)
+		}
+		if err := writeArchiveEntry(outPath, tr); err != nil {
 			return err
 		}
-		return nil
+		count++
 	}
-
-	return fmt.Errorf("llama-server not found in %s; found: %s", archivePath, strings.Join(found, ", "))
+	if count == 0 {
+		return fmt.Errorf("no files extracted from %s", archivePath)
+	}
+	return nil
 }
 
-func matchesAny(name string, targets []string) bool {
-	for _, target := range targets {
-		if strings.EqualFold(name, target) {
-			return true
+// chmodRuntimeArtifacts makes the llama-server binary and any .so files in dir
+// executable / readable (0o755). Other files are left at whatever mode the
+// archive stored.
+func chmodRuntimeArtifacts(dir string) error {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return fmt.Errorf("read runtime dir: %w", err)
+	}
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		name := e.Name()
+		base := strings.ToLower(name)
+		if base == "llama-server" || base == "llama-server.exe" || strings.Contains(base, ".so") {
+			if err := os.Chmod(filepath.Join(dir, name), 0o755); err != nil {
+				return fmt.Errorf("chmod %s: %w", name, err)
+			}
 		}
 	}
-	return false
+	return nil
 }
 
 func writeArchiveEntry(destPath string, src io.Reader) error {

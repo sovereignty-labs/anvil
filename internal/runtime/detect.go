@@ -72,6 +72,15 @@ func SelectAsset(assets []ReleaseAsset, platform Platform) (*ReleaseAsset, error
 	})
 
 	selected := candidates[0].asset
+	if platform.CUDA != "" && !strings.Contains(strings.ToLower(selected.Name), "cuda") {
+		// Linux releases don't ship a prebuilt CUDA llama-server. Make the
+		// degradation visible so users running on NVIDIA hardware know to
+		// pivot to `nollama runtime build` or supply a custom binary.
+		fmt.Fprintln(stderrWriter, "Warning: CUDA detected but no CUDA build available for this platform in this release.")
+		fmt.Fprintln(stderrWriter, "  The downloaded runtime is CPU-only.")
+		fmt.Fprintln(stderrWriter, "  For GPU acceleration, run: nollama runtime build")
+		fmt.Fprintln(stderrWriter, "  Or compile llama.cpp with CUDA and use: nollama runtime add <name> /path/to/llama-server")
+	}
 	return &selected, nil
 }
 
