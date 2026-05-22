@@ -1183,7 +1183,7 @@ func TestStartOptsStart_CPU_Device_Flags(t *testing.T) {
 func TestBuildChildEnvGPUIsolation(t *testing.T) {
 	t.Setenv("CUDA_VISIBLE_DEVICES", "stale")
 
-	env := buildChildEnv(1, false)
+	env := buildChildEnv(1, false, "/opt/nollama/runtimes/r1/llama-server")
 	want := "CUDA_VISIBLE_DEVICES=1"
 	found := false
 	stale := false
@@ -1204,7 +1204,7 @@ func TestBuildChildEnvGPUIsolation(t *testing.T) {
 }
 
 func TestBuildChildEnvCPUFallback(t *testing.T) {
-	env := buildChildEnv(-1, true)
+	env := buildChildEnv(-1, true, "")
 	want := "CUDA_VISIBLE_DEVICES="
 	for _, e := range env {
 		if e == want {
@@ -1217,7 +1217,7 @@ func TestBuildChildEnvCPUFallback(t *testing.T) {
 func TestBuildChildEnvNoGPUIndexLeavesUnset(t *testing.T) {
 	// No GPU and not forced CPU: don't override CUDA_VISIBLE_DEVICES at all.
 	t.Setenv("CUDA_VISIBLE_DEVICES", "")
-	env := buildChildEnv(-1, false)
+	env := buildChildEnv(-1, false, "")
 	for _, e := range env {
 		if strings.HasPrefix(e, "CUDA_VISIBLE_DEVICES=") {
 			t.Errorf("expected no CUDA_VISIBLE_DEVICES entry, got %s", e)
@@ -1245,6 +1245,52 @@ func envContainingCUDA(env []string) []string {
 	out := make([]string, 0)
 	for _, e := range env {
 		if strings.HasPrefix(e, "CUDA_VISIBLE_DEVICES=") {
+			out = append(out, e)
+		}
+	}
+	return out
+}
+
+func TestBuildChildEnvSetsLDLibraryPath(t *testing.T) {
+	t.Setenv("LD_LIBRARY_PATH", "")
+	env := buildChildEnv(0, false, "/opt/runtimes/llama-b9275/llama-server")
+	wantPrefix := "LD_LIBRARY_PATH=/opt/runtimes/llama-b9275"
+	for _, e := range env {
+		if e == wantPrefix {
+			return
+		}
+	}
+	t.Errorf("expected env to contain %q, got %v", wantPrefix, ldEntries(env))
+}
+
+func TestBuildChildEnvPrependsToExistingLDP(t *testing.T) {
+	t.Setenv("LD_LIBRARY_PATH", "/usr/local/lib:/opt/foo/lib")
+	env := buildChildEnv(0, false, "/opt/runtimes/llama-b9275/llama-server")
+	want := "LD_LIBRARY_PATH=/opt/runtimes/llama-b9275:/usr/local/lib:/opt/foo/lib"
+	for _, e := range env {
+		if e == want {
+			return
+		}
+	}
+	t.Errorf("expected env to contain %q, got %v", want, ldEntries(env))
+}
+
+func TestBuildChildEnvEmptyBinaryPreservesExistingLDP(t *testing.T) {
+	t.Setenv("LD_LIBRARY_PATH", "/keep/this")
+	env := buildChildEnv(0, false, "")
+	want := "LD_LIBRARY_PATH=/keep/this"
+	for _, e := range env {
+		if e == want {
+			return
+		}
+	}
+	t.Errorf("expected parent LD_LIBRARY_PATH preserved, got %v", ldEntries(env))
+}
+
+func ldEntries(env []string) []string {
+	out := make([]string, 0)
+	for _, e := range env {
+		if strings.HasPrefix(e, "LD_LIBRARY_PATH=") {
 			out = append(out, e)
 		}
 	}
