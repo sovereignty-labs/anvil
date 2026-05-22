@@ -186,13 +186,46 @@ func (r *renderState) closeReasoning(w io.Writer) {
 	r.inReasoning = false
 }
 
+// isExitCommand recognizes the many ways users naturally try to leave the
+// chat: /bye, /exit, /quit, plus bare exit/quit (case-insensitive).
+func isExitCommand(input string) bool {
+	switch strings.ToLower(strings.TrimSpace(input)) {
+	case "/bye", "/exit", "/quit", "exit", "quit":
+		return true
+	}
+	return false
+}
+
+// isConnectionError reports whether err looks like the backend went away.
+// When llama-server dies mid-session every subsequent POST returns one of
+// these — surfacing them as fatal lets the chat loop exit cleanly instead of
+// spamming errors on each user input.
+func isConnectionError(err error) bool {
+	if err == nil {
+		return false
+	}
+	s := err.Error()
+	return strings.Contains(s, "connection refused") ||
+		strings.Contains(s, "connection reset") ||
+		strings.Contains(s, "broken pipe") ||
+		strings.Contains(s, "EOF")
+}
+
+// inputResult bundles a user-input line with its read error so the chat
+// loop can select between a blocking stdin read and an interrupt.
+type inputResult struct {
+	line string
+	err  error
+}
+
 // chatLoop runs an interactive chat session against endpoint until the user
-// types /bye, sends EOF (Ctrl+D), or cancels via interrupt.
+// types an exit command, sends EOF (Ctrl+D), or sends an interrupt (Ctrl+C).
 //
-// interrupt is a channel that the caller wires up to SIGINT: each receive on
-// the channel cancels the in-flight stream (if any) without exiting the loop.
-// A second interrupt while there's no in-flight stream — i.e. at the prompt —
-// returns nil to exit cleanly.
+// interrupt is wired by the caller to SIGINT. During a streaming reply, an
+// interrupt cancels the in-flight stream and the loop continues. At the
+// prompt (no stream in flight), an interrupt exits cleanly. A connection
+// error after streamChat means the backend died — the loop reports that and
+// exits rather than spamming "connection refused" on every subsequent input.
 func chatLoop(endpoint, modelName string, interrupt <-chan struct{}, in io.Reader, out io.Writer) error {
 	supportsANSI := isTTY(out)
 	fmt.Fprintf(out, "Chatting with %s. Type /bye to exit.\n", modelName)
@@ -201,19 +234,36 @@ func chatLoop(endpoint, modelName string, interrupt <-chan struct{}, in io.Reade
 	reader := bufio.NewReader(in)
 	for {
 		fmt.Fprint(out, ">>> ")
-		line, err := readUserInput(reader)
-		if err != nil {
-			if errors.Is(err, io.EOF) {
+
+		// Read in a goroutine so the loop can also wake on interrupt while
+		// the user is staring at the prompt. The bufio.Reader keeps its
+		// position across iterations because it's captured by the closure.
+		inputCh := make(chan inputResult, 1)
+		go func() {
+			line, err := readUserInput(reader)
+			inputCh <- inputResult{line: line, err: err}
+		}()
+
+		var res inputResult
+		select {
+		case res = <-inputCh:
+		case <-interrupt:
+			fmt.Fprintln(out)
+			return nil
+		}
+
+		if res.err != nil {
+			if errors.Is(res.err, io.EOF) {
 				fmt.Fprintln(out)
 				return nil
 			}
-			return err
+			return res.err
 		}
-		line = strings.TrimSpace(line)
+		line := strings.TrimSpace(res.line)
 		if line == "" {
 			continue
 		}
-		if line == "/bye" {
+		if isExitCommand(line) {
 			return nil
 		}
 		messages = append(messages, chatMessage{Role: "user", Content: line})
@@ -238,10 +288,14 @@ func chatLoop(endpoint, modelName string, interrupt <-chan struct{}, in io.Reade
 		cancel()
 
 		if err != nil {
-			fmt.Fprintf(out, "[error] %s\n", err)
-			// Roll back the user turn so the next attempt isn't poisoned by an
-			// orphaned message with no assistant reply.
+			// Roll back the orphaned user turn either way so the message
+			// history matches what the model actually saw.
 			messages = messages[:len(messages)-1]
+			if isConnectionError(err) {
+				fmt.Fprintln(out, "Server stopped. Exiting.")
+				return nil
+			}
+			fmt.Fprintf(out, "[error] %s\n", err)
 			continue
 		}
 		messages = append(messages, chatMessage{Role: "assistant", Content: reply})
