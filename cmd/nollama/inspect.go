@@ -11,7 +11,10 @@ import (
 )
 
 func runInspect(cmd *cobra.Command, args []string) error {
-	path := args[0]
+	path, err := resolveModelPath(args[0])
+	if err != nil {
+		return err
+	}
 
 	// Parse GGUF metadata
 	meta, err := model.ParseGGUF(path)
