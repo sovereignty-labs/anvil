@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/hirdforge/nollama/internal/config"
-	"github.com/hirdforge/nollama/internal/process"
+	"github.com/sovereignty-labs/nollama/internal/config"
+	"github.com/sovereignty-labs/nollama/internal/process"
 )
 
 func newReaperTestServer(t *testing.T, idleTimeout string) (*Server, *int32) {

@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/hirdforge/nollama/internal/hardware"
-	"github.com/hirdforge/nollama/internal/model"
+	"github.com/sovereignty-labs/nollama/internal/hardware"
+	"github.com/sovereignty-labs/nollama/internal/model"
 )
 
 // Result holds the computed flags, device selection, and metadata for a model load.

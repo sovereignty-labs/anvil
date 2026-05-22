@@ -14,7 +14,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/hirdforge/nollama/internal/model"
+	"github.com/sovereignty-labs/nollama/internal/model"
 )
 
 // Route maps a model name to a llama-server backend.

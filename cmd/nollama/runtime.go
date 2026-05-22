@@ -5,7 +5,7 @@ import (
 	"os"
 	"text/tabwriter"
 
-	runtimemgr "github.com/hirdforge/nollama/internal/runtime"
+	runtimemgr "github.com/sovereignty-labs/nollama/internal/runtime"
 	"github.com/spf13/cobra"
 )
 

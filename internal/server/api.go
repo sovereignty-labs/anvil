@@ -14,12 +14,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/hirdforge/nollama/internal/config"
-	"github.com/hirdforge/nollama/internal/hardware"
-	"github.com/hirdforge/nollama/internal/model"
-	"github.com/hirdforge/nollama/internal/process"
-	"github.com/hirdforge/nollama/internal/pull"
-	runtimemgr "github.com/hirdforge/nollama/internal/runtime"
+	"github.com/sovereignty-labs/nollama/internal/config"
+	"github.com/sovereignty-labs/nollama/internal/hardware"
+	"github.com/sovereignty-labs/nollama/internal/model"
+	"github.com/sovereignty-labs/nollama/internal/process"
+	"github.com/sovereignty-labs/nollama/internal/pull"
+	runtimemgr "github.com/sovereignty-labs/nollama/internal/runtime"
 )
 
 type apiErrorResponse struct {

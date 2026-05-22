@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/hirdforge/nollama/internal/config"
+	"github.com/sovereignty-labs/nollama/internal/config"
 )
 
 // resolveModelPath resolves a bare filename (no path separator) against the

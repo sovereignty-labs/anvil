@@ -10,9 +10,9 @@ ARG DATE=unknown
 RUN CGO_ENABLED=0 GOOS=linux go build \
     -trimpath \
     -ldflags "-s -w \
-      -X github.com/hirdforge/nollama/internal/version.Version=${VERSION} \
-      -X github.com/hirdforge/nollama/internal/version.Commit=${COMMIT} \
-      -X github.com/hirdforge/nollama/internal/version.Date=${DATE}" \
+      -X github.com/sovereignty-labs/nollama/internal/version.Version=${VERSION} \
+      -X github.com/sovereignty-labs/nollama/internal/version.Commit=${COMMIT} \
+      -X github.com/sovereignty-labs/nollama/internal/version.Date=${DATE}" \
     -o /out/nollama ./cmd/nollama
 
 FROM debian:bookworm-slim

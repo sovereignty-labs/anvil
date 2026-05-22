@@ -29,7 +29,7 @@ jobs:
           COMMIT="$(git rev-parse --short HEAD)"
           DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
           CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
-            -ldflags "-X github.com/hirdforge/nollama/internal/version.Version=${VERSION} -X github.com/hirdforge/nollama/internal/version.Commit=${COMMIT} -X github.com/hirdforge/nollama/internal/version.Date=${DATE}" \
+            -ldflags "-X github.com/sovereignty-labs/nollama/internal/version.Version=${VERSION} -X github.com/sovereignty-labs/nollama/internal/version.Commit=${COMMIT} -X github.com/sovereignty-labs/nollama/internal/version.Date=${DATE}" \
             -o nollama-linux-amd64 \
             ./cmd/nollama
 

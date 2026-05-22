@@ -6,9 +6,9 @@ import (
 	"os"
 	"strings"
 
-	"github.com/hirdforge/nollama/internal/config"
-	"github.com/hirdforge/nollama/internal/federation"
-	"github.com/hirdforge/nollama/internal/version"
+	"github.com/sovereignty-labs/nollama/internal/config"
+	"github.com/sovereignty-labs/nollama/internal/federation"
+	"github.com/sovereignty-labs/nollama/internal/version"
 	mcpsrv "github.com/mark3labs/mcp-go/server"
 )
 

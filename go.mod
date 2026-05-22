@@ -1,4 +1,4 @@
-module github.com/hirdforge/nollama
+module github.com/sovereignty-labs/nollama
 
 go 1.25.5
 

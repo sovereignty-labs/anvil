@@ -11,8 +11,8 @@ import (
 	"text/tabwriter"
 	"time"
 
-	"github.com/hirdforge/nollama/internal/config"
-	"github.com/hirdforge/nollama/internal/federation"
+	"github.com/sovereignty-labs/nollama/internal/config"
+	"github.com/sovereignty-labs/nollama/internal/federation"
 	"github.com/spf13/cobra"
 )
 

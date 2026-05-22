@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/hirdforge/nollama/internal/config"
-	runtimemgr "github.com/hirdforge/nollama/internal/runtime"
+	"github.com/sovereignty-labs/nollama/internal/config"
+	runtimemgr "github.com/sovereignty-labs/nollama/internal/runtime"
 	"github.com/spf13/cobra"
 )
 
