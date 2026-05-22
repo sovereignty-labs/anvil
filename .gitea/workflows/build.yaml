@@ -2,6 +2,7 @@ name: Build and Push
 on:
   push:
     branches: [main]
+    tags: ['v*']
 env:
   REGISTRY_USER: ${{ secrets.REGISTRY_USER }}
   REGISTRY_PASSWORD: ${{ secrets.REGISTRY_PASSWORD }}
@@ -21,7 +22,7 @@ jobs:
         run: |
           cd /src
           SHA_SHORT=$(git rev-parse --short HEAD)
-          # Tag pushes (GITEA_REF_TYPE=tag) → VERSION is the tag; else "dev".
+          # Tag pushes (GITEA_REF_TYPE=tag) -> VERSION is the tag; else "dev".
           if [ "${GITEA_REF_TYPE}" = "tag" ] && [ -n "${GITEA_REF_NAME}" ]; then
             VERSION="${GITEA_REF_NAME}"
           else
@@ -46,6 +47,7 @@ jobs:
           docker cp tmp:/usr/local/bin/nollama /tmp/nollama
           docker rm tmp
 
+          # Always update rolling "latest" pre-release
           RELEASE_ID=$(curl -s -u "$AUTH" "$GITEA_API/repos/kit/nollama/releases/tags/latest" | jq -r '.id // empty')
           if [ -n "$RELEASE_ID" ]; then
             curl -s -X DELETE -u "$AUTH" "$GITEA_API/repos/kit/nollama/releases/$RELEASE_ID"
@@ -68,3 +70,21 @@ jobs:
             "$GITEA_API/repos/kit/nollama/releases/${RELEASE_ID}/assets?name=nollama-linux-amd64"
 
           echo "Published nollama binary at ${SHA_SHORT}"
+
+          # If this is a tag push, also create a proper tagged release
+          if [ "${GITEA_REF_TYPE}" = "tag" ] && [ -n "${GITEA_REF_NAME}" ]; then
+            TAG_RELEASE_RESPONSE=$(curl -s -X POST -u "$AUTH" -H "Content-Type: application/json" \
+              -d "{\"tag_name\":\"${GITEA_REF_NAME}\",\"name\":\"nollama ${GITEA_REF_NAME}\",\"body\":\"Release ${GITEA_REF_NAME}\",\"prerelease\":false,\"target_commitish\":\"main\"}" \
+              "$GITEA_API/repos/kit/nollama/releases")
+            TAG_RELEASE_ID=$(echo "$TAG_RELEASE_RESPONSE" | jq -r '.id')
+
+            if [ "$TAG_RELEASE_ID" != "null" ] && [ -n "$TAG_RELEASE_ID" ]; then
+              curl -s -X POST -u "$AUTH" \
+                -F "attachment=@/tmp/nollama" \
+                "$GITEA_API/repos/kit/nollama/releases/${TAG_RELEASE_ID}/assets?name=nollama-linux-amd64"
+              echo "Published tagged release ${GITEA_REF_NAME}"
+            else
+              echo "WARNING: Tagged release creation failed"
+              echo "$TAG_RELEASE_RESPONSE"
+            fi
+          fi
