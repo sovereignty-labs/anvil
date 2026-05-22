@@ -15,13 +15,13 @@ import (
 	"text/tabwriter"
 	"time"
 
-	"github.com/hirdforge/nollama/internal/config"
-	"github.com/hirdforge/nollama/internal/federation"
-	"github.com/hirdforge/nollama/internal/hardware"
-	"github.com/hirdforge/nollama/internal/model"
-	"github.com/hirdforge/nollama/internal/process"
-	runtimemgr "github.com/hirdforge/nollama/internal/runtime"
-	"github.com/hirdforge/nollama/internal/version"
+	"github.com/sovereignty-labs/nollama/internal/config"
+	"github.com/sovereignty-labs/nollama/internal/federation"
+	"github.com/sovereignty-labs/nollama/internal/hardware"
+	"github.com/sovereignty-labs/nollama/internal/model"
+	"github.com/sovereignty-labs/nollama/internal/process"
+	runtimemgr "github.com/sovereignty-labs/nollama/internal/runtime"
+	"github.com/sovereignty-labs/nollama/internal/version"
 	"github.com/spf13/cobra"
 )
 

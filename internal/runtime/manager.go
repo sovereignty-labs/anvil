@@ -16,7 +16,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/hirdforge/nollama/internal/config"
+	"github.com/sovereignty-labs/nollama/internal/config"
 )
 
 const (

@@ -15,11 +15,11 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/hirdforge/nollama/internal/config"
-	"github.com/hirdforge/nollama/internal/hardware"
-	nollamamcp "github.com/hirdforge/nollama/internal/mcp"
-	"github.com/hirdforge/nollama/internal/process"
-	runtimemgr "github.com/hirdforge/nollama/internal/runtime"
+	"github.com/sovereignty-labs/nollama/internal/config"
+	"github.com/sovereignty-labs/nollama/internal/hardware"
+	nollamamcp "github.com/sovereignty-labs/nollama/internal/mcp"
+	"github.com/sovereignty-labs/nollama/internal/process"
+	runtimemgr "github.com/sovereignty-labs/nollama/internal/runtime"
 )
 
 // Server is the nollama serve daemon.

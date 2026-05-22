@@ -12,8 +12,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/hirdforge/nollama/internal/config"
-	"github.com/hirdforge/nollama/internal/model"
+	"github.com/sovereignty-labs/nollama/internal/config"
+	"github.com/sovereignty-labs/nollama/internal/model"
 	mcpkit "github.com/mark3labs/mcp-go/mcp"
 )
 

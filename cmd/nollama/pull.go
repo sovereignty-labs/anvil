@@ -7,8 +7,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/hirdforge/nollama/internal/config"
-	"github.com/hirdforge/nollama/internal/pull"
+	"github.com/sovereignty-labs/nollama/internal/config"
+	"github.com/sovereignty-labs/nollama/internal/pull"
 	"github.com/spf13/cobra"
 )
 

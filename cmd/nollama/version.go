@@ -3,7 +3,7 @@ package main
 import (
 	"fmt"
 
-	"github.com/hirdforge/nollama/internal/version"
+	"github.com/sovereignty-labs/nollama/internal/version"
 	"github.com/spf13/cobra"
 )
 

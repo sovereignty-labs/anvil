@@ -13,7 +13,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/hirdforge/nollama/internal/config"
+	"github.com/sovereignty-labs/nollama/internal/config"
 )
 
 func TestHandleModels(t *testing.T) {

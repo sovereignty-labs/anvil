@@ -6,7 +6,7 @@ import (
 	"sort"
 	"strings"
 
-	builtinprofiles "github.com/hirdforge/nollama/profiles"
+	builtinprofiles "github.com/sovereignty-labs/nollama/profiles"
 	"gopkg.in/yaml.v3"
 )
 

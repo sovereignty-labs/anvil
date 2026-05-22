@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/hirdforge/nollama/internal/hardware"
-	"github.com/hirdforge/nollama/internal/model"
+	"github.com/sovereignty-labs/nollama/internal/hardware"
+	"github.com/sovereignty-labs/nollama/internal/model"
 )
 
 func writeTestGGUF(t *testing.T, dir string, name string, fileSizeBytes int64, kvs []modelTestKV) (string, *model.GGUFMetadata) {

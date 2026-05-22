@@ -6,8 +6,8 @@ import (
 	"log/slog"
 	"os"
 
-	"github.com/hirdforge/nollama/internal/config"
-	"github.com/hirdforge/nollama/internal/server"
+	"github.com/sovereignty-labs/nollama/internal/config"
+	"github.com/sovereignty-labs/nollama/internal/server"
 	"github.com/spf13/cobra"
 )
 

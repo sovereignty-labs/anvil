@@ -14,7 +14,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/hirdforge/nollama/internal/hardware"
+	"github.com/sovereignty-labs/nollama/internal/hardware"
 )
 
 // StartOpts holds the configuration for starting a new llama-server process.

@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/hirdforge/nollama/internal/config"
+	"github.com/sovereignty-labs/nollama/internal/config"
 	"gopkg.in/yaml.v3"
 )
 

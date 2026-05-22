@@ -5,7 +5,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/hirdforge/nollama/internal/hardware"
+	"github.com/sovereignty-labs/nollama/internal/hardware"
 )
 
 // handleMetrics writes Prometheus-format metrics.
