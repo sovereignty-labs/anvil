@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestParseSSEStreamAssemblesContent(t *testing.T) {
@@ -212,5 +213,102 @@ func TestChatLoopReceivesReplyFromFakeServer(t *testing.T) {
 	}
 	if !strings.Contains(out.String(), "pong") {
 		t.Errorf("expected pong in output, got %q", out.String())
+	}
+}
+
+func TestIsExitCommand(t *testing.T) {
+	cases := map[string]bool{
+		"/bye":   true,
+		"/exit":  true,
+		"/quit":  true,
+		"exit":   true,
+		"quit":   true,
+		"EXIT":   true,
+		"  /bye": true,
+		"/Bye":   true,
+		"hello":  false,
+		"":       false,
+		"/by":    false,
+	}
+	for in, want := range cases {
+		if got := isExitCommand(in); got != want {
+			t.Errorf("isExitCommand(%q) = %v, want %v", in, got, want)
+		}
+	}
+}
+
+func TestIsConnectionError(t *testing.T) {
+	cases := map[string]bool{
+		`dial tcp 127.0.0.1:11434: connect: connection refused`: true,
+		`read tcp 127.0.0.1: connection reset by peer`:          true,
+		`write tcp 127.0.0.1: broken pipe`:                      true,
+		`unexpected EOF`:                                        true,
+		`HTTP 500: model not loaded`:                            false,
+		``: false,
+	}
+	for in, want := range cases {
+		err := error(nil)
+		if in != "" {
+			err = fmt.Errorf("%s", in)
+		}
+		if got := isConnectionError(err); got != want {
+			t.Errorf("isConnectionError(%q) = %v, want %v", in, got, want)
+		}
+	}
+	if isConnectionError(nil) {
+		t.Error("isConnectionError(nil) should be false")
+	}
+}
+
+func TestChatLoopExitsOnConnectionRefused(t *testing.T) {
+	// Pick a port the kernel will refuse so the very first POST fails.
+	endpoint := "http://127.0.0.1:1" // privileged port, nothing listening
+	in := strings.NewReader("hello\n")
+	var out bytes.Buffer
+	interrupt := make(chan struct{})
+
+	err := chatLoop(endpoint, "test-model", interrupt, in, &out)
+	if err != nil {
+		t.Fatalf("chatLoop returned %v, want nil", err)
+	}
+	if !strings.Contains(out.String(), "Server stopped. Exiting.") {
+		t.Errorf("expected graceful exit message, got %q", out.String())
+	}
+}
+
+func TestChatLoopExitsOnInterruptAtPrompt(t *testing.T) {
+	// Block-forever stdin so the only way out is the interrupt.
+	in, _ := io.Pipe()
+	defer in.Close()
+	var out bytes.Buffer
+	interrupt := make(chan struct{}, 1)
+
+	done := make(chan error, 1)
+	go func() { done <- chatLoop("http://unused", "m", interrupt, in, &out) }()
+
+	// Give chatLoop a tick to reach the prompt before signaling.
+	time.Sleep(50 * time.Millisecond)
+	interrupt <- struct{}{}
+
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Errorf("chatLoop returned %v, want nil", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("chatLoop did not exit on interrupt at prompt")
+	}
+}
+
+func TestChatLoopExitsOnExitAlias(t *testing.T) {
+	for _, alias := range []string{"/bye", "/exit", "/quit", "exit", "quit"} {
+		t.Run(alias, func(t *testing.T) {
+			in := strings.NewReader(alias + "\n")
+			var out bytes.Buffer
+			interrupt := make(chan struct{})
+			if err := chatLoop("http://unused", "m", interrupt, in, &out); err != nil {
+				t.Fatalf("chatLoop returned %v", err)
+			}
+		})
 	}
 }
