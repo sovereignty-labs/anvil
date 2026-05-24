@@ -33,7 +33,7 @@ Examples:
   nollama run google_gemma-4-E2B-it-Q4_K_M
   nollama run ~/models/my-model.gguf
   nollama run Qwen3-4B-Q4_K_M --gpu 0`,
-	Args: cobra.ExactArgs(1),
+	Args: exactPositionalArgs(1),
 	RunE: runRunModel,
 }
 
@@ -64,7 +64,7 @@ func runRunModel(cmd *cobra.Command, args []string) error {
 		return runChatAgainst(endpoint, modelStem(modelName), false)
 	}
 
-	endpoint, cleanup, err := startLlamaServerForRun(cmd, cfg, modelPath, modelName)
+	endpoint, cleanup, err := startLlamaServerForRun(cmd, args, cfg, modelPath, modelName)
 	if err != nil {
 		return err
 	}
@@ -76,7 +76,7 @@ func runRunModel(cmd *cobra.Command, args []string) error {
 // startLlamaServerForRun spawns a llama-server, waits for it to become healthy,
 // and returns the OpenAI-compatible base URL plus a cleanup func that kills
 // the spawned process.
-func startLlamaServerForRun(cmd *cobra.Command, cfg *config.Config, modelPath, modelName string) (string, func(), error) {
+func startLlamaServerForRun(cmd *cobra.Command, args []string, cfg *config.Config, modelPath, modelName string) (string, func(), error) {
 	llamaServerFlag, err := resolveLlamaServerPath(cmd, cfg)
 	if err != nil {
 		return "", func() {}, err
@@ -113,7 +113,7 @@ func startLlamaServerForRun(cmd *cobra.Command, cfg *config.Config, modelPath, m
 	}
 	result.Command = buildCommand(llamaServerFlag, result.Flags)
 
-	passthrough, _ := cmd.Flags().GetStringArray("passthrough")
+	passthrough := collectPassthrough(cmd, args)
 
 	manager := process.GetManager()
 	for _, proc := range manager.List() {
