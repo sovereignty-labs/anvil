@@ -59,10 +59,59 @@ without actually launching llama-server.
 
 Pass arbitrary llama-server flags after '--':
   nollama load model.gguf -- --ctx-size 131072 --parallel 4`,
-	Args: cobra.ExactArgs(1),
+	Args: exactPositionalArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return runLoad(cmd, args)
 	},
+}
+
+// exactPositionalArgs validates that the command has exactly n positional
+// args BEFORE a `--` separator, ignoring anything after `--`. cobra.ExactArgs
+// counts post-dash tokens as positionals and rejects them; this lets users
+// write `nollama load model.gguf -- --ctx-size 32768` as the help text
+// promises.
+func exactPositionalArgs(n int) cobra.PositionalArgs {
+	return func(cmd *cobra.Command, args []string) error {
+		positional := positionalArgsBeforeDash(cmd, args)
+		if len(positional) != n {
+			return fmt.Errorf("accepts %d arg(s), received %d", n, len(positional))
+		}
+		return nil
+	}
+}
+
+// positionalArgsBeforeDash returns the slice of args that came before the
+// `--` separator (or the whole slice when no separator was used).
+func positionalArgsBeforeDash(cmd *cobra.Command, args []string) []string {
+	dash := cmd.ArgsLenAtDash()
+	if dash < 0 || dash > len(args) {
+		return args
+	}
+	return args[:dash]
+}
+
+// argsAfterDash returns the slice of args that came after `--` (empty when
+// no separator was used).
+func argsAfterDash(cmd *cobra.Command, args []string) []string {
+	dash := cmd.ArgsLenAtDash()
+	if dash < 0 || dash >= len(args) {
+		return nil
+	}
+	return args[dash:]
+}
+
+// collectPassthrough returns the final llama-server passthrough args by
+// combining `--passthrough` values (each split on whitespace, so users can
+// pass `--passthrough "--ctx-size 32768"` and get the two tokens llama-server
+// expects) with everything after a `--` separator.
+func collectPassthrough(cmd *cobra.Command, args []string) []string {
+	raw, _ := cmd.Flags().GetStringArray("passthrough")
+	var out []string
+	for _, entry := range raw {
+		out = append(out, strings.Fields(entry)...)
+	}
+	out = append(out, argsAfterDash(cmd, args)...)
+	return out
 }
 
 // --- unload ---
@@ -399,14 +448,10 @@ func runLoad(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	// Get passthrough flags (everything after --)
-	passthrough, err := cmd.Flags().GetStringArray("passthrough")
-	if err != nil {
-		passthrough = []string{}
-	}
-
-	// If no --passthrough flag but there's a `--` separator in args, handle it
-	// Cobra handles this; passthrough should be empty unless --passthrough is used
+	// Collect passthrough: --passthrough values (each split on whitespace so
+	// `--passthrough "--ctx-size 32768"` becomes two tokens) plus everything
+	// after a `--` separator.
+	passthrough := collectPassthrough(cmd, args)
 
 	// Merge passthrough flags
 	mergedFlags := process.MergePassthroughFlags(result.Flags, passthrough)
