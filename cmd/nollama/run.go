@@ -40,6 +40,7 @@ Examples:
 func init() {
 	runModelCmd.Flags().Int("gpu", -1, "GPU index to load on")
 	runModelCmd.Flags().Bool("cpu", false, "Force CPU inference")
+	runModelCmd.Flags().String("runtime", "", "Use a specific llama-server runtime")
 	runModelCmd.Flags().Int("port", 0, "Pin llama-server to this port instead of auto-assigning")
 	runModelCmd.Flags().StringArray("passthrough", nil, "Extra llama-server flags (repeatable)")
 	runModelCmd.Flags().Duration("ready-timeout", 120*time.Second, "How long to wait for llama-server to become healthy")
@@ -64,7 +65,8 @@ func runRunModel(cmd *cobra.Command, args []string) error {
 		return runChatAgainst(endpoint, modelStem(modelName), false)
 	}
 
-	endpoint, cleanup, err := startLlamaServerForRun(cmd, args, cfg, modelPath, modelName)
+	runtimeName, _ := cmd.Flags().GetString("runtime")
+	endpoint, cleanup, err := startLlamaServerForRun(cmd, args, cfg, modelPath, modelName, runtimeName)
 	if err != nil {
 		return err
 	}
@@ -76,8 +78,8 @@ func runRunModel(cmd *cobra.Command, args []string) error {
 // startLlamaServerForRun spawns a llama-server, waits for it to become healthy,
 // and returns the OpenAI-compatible base URL plus a cleanup func that kills
 // the spawned process.
-func startLlamaServerForRun(cmd *cobra.Command, args []string, cfg *config.Config, modelPath, modelName string) (string, func(), error) {
-	llamaServerFlag, err := resolveLlamaServerPath(cmd, cfg)
+func startLlamaServerForRun(cmd *cobra.Command, args []string, cfg *config.Config, modelPath, modelName, runtimeName string) (string, func(), error) {
+	llamaServerFlag, err := resolveLlamaServerPathWithRuntime(cmd, cfg, runtimeName)
 	if err != nil {
 		return "", func() {}, err
 	}
