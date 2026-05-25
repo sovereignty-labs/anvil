@@ -511,6 +511,25 @@ func (m *Manager) Add(name, binaryPath string) error {
 	return nil
 }
 
+// ResolveNamed returns the llama-server binary for the named runtime.
+func (m *Manager) ResolveNamed(name string) (string, error) {
+	if err := m.ensureDir(); err != nil {
+		return "", fmt.Errorf("prepare runtimes dir: %w", err)
+	}
+	if err := validateRuntimeName(name); err != nil {
+		return "", err
+	}
+
+	bin, ok, err := m.findBinary(filepath.Join(m.runtimesDir, name))
+	if err != nil {
+		return "", err
+	}
+	if !ok {
+		return "", fmt.Errorf("runtime %q has no llama-server binary", name)
+	}
+	return bin, nil
+}
+
 // Resolve returns the active llama-server binary path.
 func (m *Manager) Resolve() (string, error) {
 	if err := m.ensureDir(); err != nil {

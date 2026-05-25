@@ -125,6 +125,28 @@ func TestResolveActiveRuntime(t *testing.T) {
 	}
 }
 
+func TestResolveNamedRuntime(t *testing.T) {
+	dir := t.TempDir()
+	mgr := &Manager{runtimesDir: dir}
+
+	runtimeDir := filepath.Join(dir, "turbo")
+	if err := os.MkdirAll(runtimeDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	binaryPath := filepath.Join(runtimeDir, runtimeBinaryName())
+	if err := os.WriteFile(binaryPath, []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := mgr.ResolveNamed("turbo")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != binaryPath {
+		t.Fatalf("ResolveNamed() = %q, want %q", got, binaryPath)
+	}
+}
+
 func TestResolveNoActiveRuntime(t *testing.T) {
 	dir := t.TempDir()
 	mgr := &Manager{runtimesDir: dir}

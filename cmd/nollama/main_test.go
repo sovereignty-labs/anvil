@@ -1,9 +1,12 @@
 package main
 
 import (
+	"os"
+	"path/filepath"
 	"reflect"
 	"testing"
 
+	"github.com/sovereignty-labs/nollama/internal/config"
 	"github.com/spf13/cobra"
 )
 
@@ -69,6 +72,46 @@ func TestBuildRemoteLoadRequestWithoutProfilesOmitsFlags(t *testing.T) {
 	}
 }
 
+func TestResolveLlamaServerPathUsesNamedRuntimeWhenRequested(t *testing.T) {
+	xdgDir := t.TempDir()
+	runtimesDir := filepath.Join(xdgDir, "runtimes")
+	runtimeDir := filepath.Join(runtimesDir, "turbo")
+	if err := os.MkdirAll(runtimeDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	binaryPath := filepath.Join(runtimeDir, "llama-server")
+	if err := os.WriteFile(binaryPath, []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	configDir := filepath.Join(xdgDir, "nollama")
+	if err := os.MkdirAll(configDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(configDir, "config.yaml"), []byte("runtimes_dir: "+runtimesDir+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Setenv("XDG_CONFIG_HOME", xdgDir)
+
+	cmd := newLoadTestCommand(t)
+	if err := cmd.Flags().Set("runtime", "turbo"); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := config.DefaultConfig()
+	cfg.LlamaServer = "/tmp/should-not-win"
+
+	got, err := resolveLlamaServerPath(cmd, cfg)
+	if err != nil {
+		t.Fatalf("resolveLlamaServerPath failed: %v", err)
+	}
+	if got != binaryPath {
+		t.Fatalf("expected runtime binary %q, got %q", binaryPath, got)
+	}
+}
+
 func newLoadTestCommand(t *testing.T) *cobra.Command {
 	t.Helper()
 
@@ -79,5 +122,6 @@ func newLoadTestCommand(t *testing.T) *cobra.Command {
 	cmd.Flags().Bool("swap", false, "")
 	cmd.Flags().Int("port", 0, "")
 	cmd.Flags().String("alias", "", "")
+	cmd.Flags().String("runtime", "", "")
 	return cmd
 }
