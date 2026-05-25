@@ -11,9 +11,10 @@ import (
 
 var runtimeInstallVersion string
 var (
-	runtimeBuildRepo   string
-	runtimeBuildBranch string
-	runtimeBuildName   string
+	runtimeBuildRepo    string
+	runtimeBuildBranch  string
+	runtimeBuildName    string
+	runtimeBuildBackend string
 )
 
 func init() {
@@ -21,10 +22,11 @@ func init() {
 
 	runtimeBuildCmd.Flags().StringVar(&runtimeBuildRepo, "repo", "", "Git repository to clone (default: ggml-org/llama.cpp)")
 	runtimeBuildCmd.Flags().StringVar(&runtimeBuildBranch, "branch", "", "Branch or tag to checkout")
-	runtimeBuildCmd.Flags().StringVar(&runtimeBuildName, "name", "", "Runtime name (default: derived from repo/branch)")
+	runtimeBuildCmd.Flags().StringVar(&runtimeBuildName, "name", "", "Runtime name (default: llama-build, llama-vulkan, or llama-cpu)")
+	runtimeBuildCmd.Flags().StringVar(&runtimeBuildBackend, "backend", "", "GPU backend to use (cuda, vulkan, cpu; default: auto-detect)")
 	runtimeBuildCmd.RunE = runRuntimeBuild
 	runtimeBuildCmd.Short = "Build llama-server from source"
-	runtimeBuildCmd.Long = "Clone and compile llama.cpp (or a fork) from source. Requires git, cmake, and a C/C++ compiler. For NVIDIA GPU support, install the CUDA toolkit (nvcc on PATH)."
+	runtimeBuildCmd.Long = "Clone and compile llama.cpp (or a fork) from source. Requires git, cmake, and a C/C++ compiler. Backend auto-detection prefers CUDA (nvcc), then Vulkan, then CPU-only."
 }
 
 func runRuntimeInstall(_ *cobra.Command, _ []string) error {
@@ -36,9 +38,10 @@ func runRuntimeInstall(_ *cobra.Command, _ []string) error {
 func runRuntimeBuild(_ *cobra.Command, _ []string) error {
 	mgr := runtimemgr.NewManager()
 	_, err := mgr.Build(runtimemgr.BuildOpts{
-		Repo:   runtimeBuildRepo,
-		Branch: runtimeBuildBranch,
-		Name:   runtimeBuildName,
+		Repo:    runtimeBuildRepo,
+		Branch:  runtimeBuildBranch,
+		Name:    runtimeBuildName,
+		Backend: runtimeBuildBackend,
 	})
 	return err
 }

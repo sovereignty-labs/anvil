@@ -187,13 +187,187 @@ func TestHomeRuntimesDirEmptyWhenHOMEUnset(t *testing.T) {
 	}
 }
 
+func TestDetectBuildBackendCUDA(t *testing.T) {
+	tmpDir := t.TempDir()
+	nvcc := filepath.Join(tmpDir, "nvcc")
+	if err := os.WriteFile(nvcc, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	oldLookPath := execLookPath
+	oldFileStat := fileStat
+	t.Cleanup(func() {
+		execLookPath = oldLookPath
+		fileStat = oldFileStat
+	})
+
+	execLookPath = func(file string) (string, error) {
+		if file == "nvcc" {
+			return nvcc, nil
+		}
+		return "", os.ErrNotExist
+	}
+	fileStat = func(string) (os.FileInfo, error) {
+		return nil, os.ErrNotExist
+	}
+
+	got, err := detectBuildBackend()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.backend != BuildBackendCUDA {
+		t.Fatalf("backend = %q, want cuda", got.backend)
+	}
+	if got.label != "CUDA (nvcc found)" {
+		t.Fatalf("label = %q", got.label)
+	}
+}
+
+func TestDetectBuildBackendVulkan(t *testing.T) {
+	tmpDir := t.TempDir()
+	glslc := filepath.Join(tmpDir, "glslc")
+	if err := os.WriteFile(glslc, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	oldLookPath := execLookPath
+	oldFileStat := fileStat
+	t.Cleanup(func() {
+		execLookPath = oldLookPath
+		fileStat = oldFileStat
+	})
+
+	execLookPath = func(file string) (string, error) {
+		switch file {
+		case "nvcc", "pkg-config":
+			return "", os.ErrNotExist
+		case "glslc":
+			return glslc, nil
+		default:
+			return "", os.ErrNotExist
+		}
+	}
+	fileStat = func(path string) (os.FileInfo, error) {
+		if path == "/usr/include/vulkan/vulkan.h" {
+			return nil, nil
+		}
+		return nil, os.ErrNotExist
+	}
+
+	got, err := detectBuildBackend()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.backend != BuildBackendVulkan {
+		t.Fatalf("backend = %q, want vulkan", got.backend)
+	}
+	if got.label != "Vulkan (libvulkan + glslc found)" {
+		t.Fatalf("label = %q", got.label)
+	}
+}
+
+func TestDetectBuildBackendCPU(t *testing.T) {
+	oldLookPath := execLookPath
+	oldFileStat := fileStat
+	t.Cleanup(func() {
+		execLookPath = oldLookPath
+		fileStat = oldFileStat
+	})
+
+	execLookPath = func(string) (string, error) {
+		return "", os.ErrNotExist
+	}
+	fileStat = func(string) (os.FileInfo, error) {
+		return nil, os.ErrNotExist
+	}
+
+	got, err := detectBuildBackend()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.backend != BuildBackendCPU {
+		t.Fatalf("backend = %q, want cpu", got.backend)
+	}
+	if got.label != "CPU only (no GPU toolkit found)" {
+		t.Fatalf("label = %q", got.label)
+	}
+}
+
+func TestResolveBuildBackendVulkanOverridesAuto(t *testing.T) {
+	tmpDir := t.TempDir()
+	nvcc := filepath.Join(tmpDir, "nvcc")
+	glslc := filepath.Join(tmpDir, "glslc")
+	for _, path := range []string{nvcc, glslc} {
+		if err := os.WriteFile(path, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	oldLookPath := execLookPath
+	oldFileStat := fileStat
+	t.Cleanup(func() {
+		execLookPath = oldLookPath
+		fileStat = oldFileStat
+	})
+
+	execLookPath = func(file string) (string, error) {
+		switch file {
+		case "nvcc":
+			return nvcc, nil
+		case "glslc":
+			return glslc, nil
+		case "pkg-config":
+			return "", os.ErrNotExist
+		default:
+			return "", os.ErrNotExist
+		}
+	}
+	fileStat = func(path string) (os.FileInfo, error) {
+		if path == "/usr/include/vulkan/vulkan.h" {
+			return nil, nil
+		}
+		return nil, os.ErrNotExist
+	}
+
+	got, err := resolveBuildBackend("vulkan")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.backend != BuildBackendVulkan {
+		t.Fatalf("backend = %q, want vulkan", got.backend)
+	}
+}
+
+func TestDefaultBuildRuntimeName(t *testing.T) {
+	if got := defaultBuildRuntimeName(BuildBackendVulkan, "https://example.com/ggml-org/llama.cpp.git", "main"); got != "llama-vulkan" {
+		t.Fatalf("vulkan name = %q, want llama-vulkan", got)
+	}
+	if got := defaultBuildRuntimeName(BuildBackendCPU, "https://example.com/ggml-org/llama.cpp.git", "main"); got != "llama-cpu" {
+		t.Fatalf("cpu name = %q, want llama-cpu", got)
+	}
+}
+
+func TestBuildCMakeArgsIncludesVulkan(t *testing.T) {
+	args := buildCMakeArgs(BuildBackendVulkan)
+	found := false
+	for _, arg := range args {
+		if arg == "-DGGML_VULKAN=ON" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("expected Vulkan cmake flag in %v", args)
+	}
+}
+
 func TestStripTopDir(t *testing.T) {
 	cases := map[string]string{
-		"llama-b9275/llama-server":          "llama-server",
-		"llama-b9275/lib/libfoo.so":         "lib/libfoo.so",
-		"foo":                               "foo",
-		"/llama-b9275/llama-server":         "llama-server",
-		"":                                  "",
+		"llama-b9275/llama-server":  "llama-server",
+		"llama-b9275/lib/libfoo.so": "lib/libfoo.so",
+		"foo":                       "foo",
+		"/llama-b9275/llama-server": "llama-server",
+		"":                          "",
 	}
 	for in, want := range cases {
 		if got := stripTopDir(in); got != want {

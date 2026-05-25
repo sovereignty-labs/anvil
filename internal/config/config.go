@@ -86,6 +86,9 @@ type AutoloadEntry struct {
 
 	// Flags are llama-server flags for this model.
 	Flags map[string]interface{} `yaml:"flags"`
+
+	// Env defines environment variables passed to the llama-server child process.
+	Env map[string]string `yaml:"env"`
 }
 
 // GPUOverride allows manual correction of auto-detected GPU info.
