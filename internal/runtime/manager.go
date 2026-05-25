@@ -249,9 +249,10 @@ func (m *Manager) Install(version string) (*RuntimeInfo, error) {
 
 // BuildOpts configures a from-source runtime build.
 type BuildOpts struct {
-	Repo   string // git URL (default: github.com/ggml-org/llama.cpp)
-	Branch string // optional branch / tag to checkout
-	Name   string // runtime name (default: derived from repo)
+	Repo    string // git URL (default: github.com/ggml-org/llama.cpp)
+	Branch  string // optional branch / tag to checkout
+	Name    string // runtime name (default: derived from backend/repo)
+	Backend string // cuda, vulkan, cpu, or empty for auto-detect
 }
 
 // Build clones llama.cpp (or a fork), runs cmake + cmake --build, then copies
@@ -262,24 +263,41 @@ func (m *Manager) Build(opts BuildOpts) (*RuntimeInfo, error) {
 		return nil, fmt.Errorf("prepare runtimes dir: %w", err)
 	}
 
+	selection, err := resolveBuildBackend(opts.Backend)
+	if err != nil {
+		return nil, err
+	}
+	if strings.TrimSpace(opts.Backend) == "" || strings.EqualFold(strings.TrimSpace(opts.Backend), "auto") {
+		fmt.Fprintf(os.Stderr, "Detected: %s\n", selection.label)
+	} else {
+		fmt.Fprintf(os.Stderr, "Using backend: %s\n", selection.label)
+	}
+
 	repo := strings.TrimSpace(opts.Repo)
 	if repo == "" {
 		repo = defaultBuildRepo
 	}
 	name := strings.TrimSpace(opts.Name)
 	if name == "" {
-		name = deriveBuildRuntimeName(repo, opts.Branch)
+		name = defaultBuildRuntimeName(selection.backend, repo, opts.Branch)
 	}
 	if err := validateRuntimeName(name); err != nil {
 		return nil, err
 	}
 
-	platform := DetectPlatform()
-	tools, err := checkBuildTools(platform)
+	tools, err := checkBuildTools()
 	if err != nil {
 		return nil, err
 	}
 	printBuildTools(tools)
+	if selection.backend == BuildBackendCUDA && tools.nvcc == "" {
+		return nil, fmt.Errorf("CUDA build requires nvcc on PATH")
+	}
+	if selection.backend == BuildBackendVulkan {
+		if err := ensureVulkanBuildPrereqs(); err != nil {
+			return nil, err
+		}
+	}
 
 	srcDir, err := os.MkdirTemp("", "nollama-build-")
 	if err != nil {
@@ -297,16 +315,7 @@ func (m *Manager) Build(opts BuildOpts) (*RuntimeInfo, error) {
 		return nil, fmt.Errorf("git clone: %w", err)
 	}
 
-	cmakeArgs := []string{
-		"-B", "build",
-		"-DBUILD_SHARED_LIBS=ON",
-		"-DLLAMA_BUILD_TESTS=OFF",
-		"-DLLAMA_BUILD_EXAMPLES=OFF",
-		"-DLLAMA_BUILD_SERVER=ON",
-	}
-	if platform.CUDA != "" && tools.nvcc != "" {
-		cmakeArgs = append(cmakeArgs, "-DGGML_CUDA=ON")
-	}
+	cmakeArgs := buildCMakeArgs(selection.backend)
 	fmt.Fprintf(os.Stderr, "\nConfiguring: cmake %s\n", strings.Join(cmakeArgs, " "))
 	if err := runBuildCmd(srcDir, "cmake", cmakeArgs...); err != nil {
 		return nil, fmt.Errorf("cmake configure: %w", err)

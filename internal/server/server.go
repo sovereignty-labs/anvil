@@ -291,6 +291,7 @@ func (s *Server) loadModel(entry config.AutoloadEntry, hw *hardware.Inventory) (
 			"warning", warning,
 		)
 	}
+	opts.Env, merged = buildAutoloadEnv(entry, merged)
 	opts.ExtraFlags = config.FlagsMapToSlice(merged)
 	// When an alias is configured, pass --alias to llama-server so its
 	// /v1/models response advertises the alias as the model name.
@@ -316,6 +317,25 @@ func (s *Server) loadModel(entry config.AutoloadEntry, hw *hardware.Inventory) (
 	}
 
 	return s.procMgr.StartOptsStart(opts)
+}
+
+func buildAutoloadEnv(entry config.AutoloadEntry, merged map[string]interface{}) (map[string]string, map[string]interface{}) {
+	if len(entry.Env) == 0 && len(merged) == 0 {
+		return nil, merged
+	}
+
+	env := make(map[string]string, len(entry.Env)+1)
+	for key, value := range entry.Env {
+		env[key] = value
+	}
+	if raw, ok := merged["vk-device"]; ok {
+		env["GGML_VK_DEVICE"] = fmt.Sprintf("%v", raw)
+		delete(merged, "vk-device")
+	}
+	if len(env) == 0 {
+		env = nil
+	}
+	return env, merged
 }
 
 func (s *Server) profileWarnings(requires []config.ProfileRequires) []string {

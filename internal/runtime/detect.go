@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"fmt"
+	"os"
 	osexec "os/exec"
 	stdlib "runtime"
 	"sort"
@@ -22,6 +23,7 @@ var (
 
 	execLookPath = lookPath
 	execCommand  = command
+	fileStat     = os.Stat
 )
 
 // DetectPlatform detects the local platform and whether CUDA is available.

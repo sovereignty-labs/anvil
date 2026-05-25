@@ -24,6 +24,7 @@ type StartOpts struct {
 	GPU          int      // GPU index (-1 for CPU)
 	ForceCPU     bool     // force CPU inference
 	ExtraFlags   []string // additional llama-server flags
+	Env          map[string]string
 	Hardware     *hardware.Inventory
 	ReservedPort int // port that should be avoided (e.g. nollama proxy port)
 	PinnedPort   int // when > 0, bind to this exact port instead of auto-assigning
@@ -69,11 +70,11 @@ func (p *ProcessInfo) Uptime() time.Duration {
 
 // Manager tracks all llama-server child processes.
 type Manager struct {
-	mu       sync.RWMutex
-	procs    map[int]*ProcessInfo // keyed by PID
-	portMap  map[int]*ProcessInfo // keyed by port
-	logDir   string
-	logger   *slog.Logger
+	mu      sync.RWMutex
+	procs   map[int]*ProcessInfo // keyed by PID
+	portMap map[int]*ProcessInfo // keyed by port
+	logDir  string
+	logger  *slog.Logger
 }
 
 var defaultManager *Manager
@@ -155,16 +156,30 @@ func (m *Manager) openLogFile(port int) (*os.File, error) {
 // LD_LIBRARY_PATH is prepended with filepath.Dir(llamaServerPath) so the
 // release tarball's libllama-common.so / libllama.so / libggml*.so resolve
 // without needing a system-wide install. Empty llamaServerPath skips that.
-func buildChildEnv(gpuIndex int, forceCPU bool, llamaServerPath string) []string {
+// extraEnv carries caller-supplied overrides such as GGML_VK_DEVICE.
+func buildChildEnv(gpuIndex int, forceCPU bool, llamaServerPath string, extraEnv map[string]string) []string {
 	parent := os.Environ()
-	filtered := make([]string, 0, len(parent)+2)
+	filtered := make([]string, 0, len(parent)+len(extraEnv)+2)
 	existingLDP := ""
+	overrides := make(map[string]struct{}, len(extraEnv))
+	for key := range extraEnv {
+		if strings.TrimSpace(key) == "" {
+			continue
+		}
+		if key == "CUDA_VISIBLE_DEVICES" || key == "LD_LIBRARY_PATH" {
+			continue
+		}
+		overrides[key] = struct{}{}
+	}
 	for _, e := range parent {
+		key, _, _ := strings.Cut(e, "=")
 		switch {
 		case strings.HasPrefix(e, "CUDA_VISIBLE_DEVICES="):
 			// drop — we set our own below
 		case strings.HasPrefix(e, "LD_LIBRARY_PATH="):
 			existingLDP = strings.TrimPrefix(e, "LD_LIBRARY_PATH=")
+		case key != "" && hasEnvOverride(overrides, key):
+			// drop stale parent value for any override we are about to set
 		default:
 			filtered = append(filtered, e)
 		}
@@ -186,7 +201,22 @@ func buildChildEnv(gpuIndex int, forceCPU bool, llamaServerPath string) []string
 		// Preserve the parent's LD_LIBRARY_PATH when we have nothing to prepend.
 		filtered = append(filtered, "LD_LIBRARY_PATH="+existingLDP)
 	}
+	if len(overrides) > 0 {
+		keys := make([]string, 0, len(overrides))
+		for key := range overrides {
+			keys = append(keys, key)
+		}
+		sort.Strings(keys)
+		for _, key := range keys {
+			filtered = append(filtered, key+"="+extraEnv[key])
+		}
+	}
 	return filtered
+}
+
+func hasEnvOverride(overrides map[string]struct{}, key string) bool {
+	_, ok := overrides[key]
+	return ok
 }
 
 // parseCUDADeviceIndex extracts N from a "cuda:N" device string. Returns -1
@@ -298,7 +328,7 @@ func (m *Manager) Start(result *Result, modelName string, passthrough []string) 
 	// Isolate the spawned process to its assigned GPU (or hide all GPUs in CPU
 	// mode) so two llama-servers can't spread across the same device. With
 	// CUDA_VISIBLE_DEVICES=N, llama-server sees a single device as its index 0.
-	cmd.Env = buildChildEnv(parseCUDADeviceIndex(result.SelectedDevice), result.CPUFallback, llamaServerPath)
+	cmd.Env = buildChildEnv(parseCUDADeviceIndex(result.SelectedDevice), result.CPUFallback, llamaServerPath, nil)
 
 	// Start the process
 	if err := cmd.Start(); err != nil {
@@ -388,7 +418,7 @@ func (m *Manager) StartOptsStart(opts StartOpts) (int, error) {
 	if opts.ForceCPU {
 		gpuForEnv = -1
 	}
-	cmd.Env = buildChildEnv(gpuForEnv, opts.ForceCPU, opts.LlamaServer)
+	cmd.Env = buildChildEnv(gpuForEnv, opts.ForceCPU, opts.LlamaServer, opts.Env)
 
 	modelName := filepath.Base(opts.ModelPath)
 

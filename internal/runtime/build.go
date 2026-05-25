@@ -22,10 +22,8 @@ type buildTools struct {
 }
 
 // checkBuildTools resolves the required toolchain on PATH. Returns an error
-// when git or cmake is missing. nvcc is only required when platform.CUDA is
-// available AND the caller wants a GPU build (we surface its presence but
-// don't fail on absence — Build() decides whether to set -DGGML_CUDA=ON).
-func checkBuildTools(platform Platform) (buildTools, error) {
+// when git or cmake is missing.
+func checkBuildTools() (buildTools, error) {
 	t := buildTools{
 		git:   lookPathOrEmpty("git"),
 		cmake: lookPathOrEmpty("cmake"),
@@ -45,9 +43,6 @@ func checkBuildTools(platform Platform) (buildTools, error) {
 	}
 	if len(missing) > 0 {
 		return t, fmt.Errorf("missing build tool(s): %s — install via your package manager (e.g. apt install build-essential cmake git)", strings.Join(missing, ", "))
-	}
-	if platform.CUDA != "" && t.nvcc == "" {
-		fmt.Fprintln(stderrWriter, "Warning: CUDA detected but nvcc not on PATH; building CPU-only. Install the CUDA toolkit and re-run for GPU support.")
 	}
 	return t, nil
 }

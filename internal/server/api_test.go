@@ -363,3 +363,26 @@ func TestHandleUploadSHA256Mismatch(t *testing.T) {
 		t.Fatalf("expected partial file to be cleaned up, stat err=%v", err)
 	}
 }
+
+func TestBuildAutoloadEnvMapsVkDevice(t *testing.T) {
+	entry := config.AutoloadEntry{
+		Env: map[string]string{
+			"FOO": "bar",
+		},
+	}
+	merged := map[string]interface{}{
+		"ctx-size":  65536,
+		"vk-device": "1",
+	}
+
+	env, flags := buildAutoloadEnv(entry, merged)
+	if env["FOO"] != "bar" {
+		t.Fatalf("env FOO = %q, want bar", env["FOO"])
+	}
+	if env["GGML_VK_DEVICE"] != "1" {
+		t.Fatalf("env GGML_VK_DEVICE = %q, want 1", env["GGML_VK_DEVICE"])
+	}
+	if _, ok := flags["vk-device"]; ok {
+		t.Fatal("vk-device flag should be removed before llama-server argv is built")
+	}
+}
