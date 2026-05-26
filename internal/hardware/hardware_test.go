@@ -31,6 +31,75 @@ func TestDetectGPUs(t *testing.T) {
 	t.Logf("GPUs found: %d", len(gpus))
 }
 
+func TestParseROCmSMICSVWithOneAMDGPU(t *testing.T) {
+	out := `
+GPU,Metric,Value
+GPU[0],Device Name,AMD Radeon RX 7900 XTX
+GPU[0],VRAM Total Memory (B),25769803776
+GPU[0],VRAM Total Used Memory (B),8388608
+`
+
+	gpus := parseROCmSMICSV(out)
+	if len(gpus) != 1 {
+		t.Fatalf("expected 1 ROCm GPU, got %d", len(gpus))
+	}
+	gpu := gpus[0]
+	if gpu.Index != 0 {
+		t.Fatalf("Index = %d, want 0", gpu.Index)
+	}
+	if gpu.Name != "AMD Radeon RX 7900 XTX" {
+		t.Fatalf("Name = %q, want AMD Radeon RX 7900 XTX", gpu.Name)
+	}
+	if gpu.VRAMTotal != 24576 {
+		t.Fatalf("VRAMTotal = %d, want 24576", gpu.VRAMTotal)
+	}
+	if gpu.VRAMUsed != 8 {
+		t.Fatalf("VRAMUsed = %d, want 8", gpu.VRAMUsed)
+	}
+	if gpu.VRAMFree != 24568 {
+		t.Fatalf("VRAMFree = %d, want 24568", gpu.VRAMFree)
+	}
+}
+
+func TestDetectROCmGPUsMissingReturnsEmpty(t *testing.T) {
+	t.Setenv("PATH", t.TempDir())
+	gpus, err := detectROCmGPUs()
+	if err != nil {
+		t.Fatalf("detectROCmGPUs error: %v", err)
+	}
+	if len(gpus) != 0 {
+		t.Fatalf("expected no ROCm GPUs when rocm-smi is absent, got %d", len(gpus))
+	}
+}
+
+func TestDetectFallsBackToROCmWhenNVIDIANoGPUs(t *testing.T) {
+	dir := t.TempDir()
+	writeExecutableScript(t, dir, "nvidia-smi", "#!/bin/sh\nexit 0\n")
+	writeExecutableScript(t, dir, "rocm-smi", `#!/bin/sh
+printf '%s\n' \
+  'GPU,Metric,Value' \
+  'GPU[0],Device Name,AMD Radeon RX 7900 XTX' \
+  'GPU[0],VRAM Total Memory (B),25769803776' \
+  'GPU[0],VRAM Total Used Memory (B),8388608'
+`)
+	t.Setenv("PATH", dir)
+
+	inv, err := Detect()
+	if err != nil {
+		t.Fatalf("Detect error: %v", err)
+	}
+	if len(inv.GPUs) != 1 {
+		t.Fatalf("expected 1 ROCm GPU from fallback, got %d", len(inv.GPUs))
+	}
+	gpu := inv.GPUs[0]
+	if gpu.Name != "AMD Radeon RX 7900 XTX" {
+		t.Fatalf("unexpected GPU name: %+v", gpu)
+	}
+	if gpu.VRAMTotal != 24576 || gpu.VRAMUsed != 8 || gpu.VRAMFree != 24568 {
+		t.Fatalf("unexpected GPU VRAM values: %+v", gpu)
+	}
+}
+
 func TestDetect(t *testing.T) {
 	inv, err := Detect()
 	if err != nil {
@@ -189,4 +258,13 @@ func createSysfsGPU(t *testing.T, root string, card int, vendor string, totalByt
 	if err := os.WriteFile(filepath.Join(cardDir, "mem_info_vram_used"), []byte(strconv.FormatUint(usedBytes, 10)+"\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
+}
+
+func writeExecutableScript(t *testing.T, dir, name, body string) string {
+	t.Helper()
+	path := filepath.Join(dir, name)
+	if err := os.WriteFile(path, []byte(body), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return path
 }

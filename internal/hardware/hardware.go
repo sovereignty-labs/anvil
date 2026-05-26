@@ -3,7 +3,9 @@ package hardware
 
 import (
 	"bufio"
+	"encoding/csv"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -96,6 +98,206 @@ func DetectGPUs() ([]GPU, error) {
 		})
 	}
 	return gpus, nil
+}
+
+// detectROCmGPUs enumerates AMD GPUs via rocm-smi.
+// Returns nil (not error) if rocm-smi is not found.
+func detectROCmGPUs() ([]GPU, error) {
+	smiPath, err := exec.LookPath("rocm-smi")
+	if err != nil {
+		return nil, nil
+	}
+	cmd := exec.Command(smiPath, "--showproductname", "--showmeminfo", "vram", "--csv")
+	out, err := cmd.Output()
+	if err != nil {
+		return nil, fmt.Errorf("rocm-smi failed: %w", err)
+	}
+	return parseROCmSMICSV(string(out)), nil
+}
+
+type rocmGPUState struct {
+	Index     int
+	Name      string
+	VRAMTotal uint64 // MiB
+	VRAMUsed  uint64 // MiB
+	hasName   bool
+	hasTotal  bool
+	hasUsed   bool
+}
+
+func parseROCmSMICSV(out string) []GPU {
+	records := make(map[int]*rocmGPUState)
+	order := make([]int, 0)
+
+	reader := csv.NewReader(strings.NewReader(out))
+	reader.FieldsPerRecord = -1
+	reader.TrimLeadingSpace = true
+
+	for {
+		rec, err := reader.Read()
+		if err == io.EOF {
+			break
+		}
+		if err != nil || len(rec) == 0 {
+			continue
+		}
+
+		fields := make([]string, 0, len(rec))
+		for _, field := range rec {
+			field = strings.TrimSpace(strings.Trim(field, `"`))
+			if field != "" {
+				fields = append(fields, field)
+			}
+		}
+		if len(fields) == 0 {
+			continue
+		}
+
+		idx, ok := parseROCmGPUIndex(fields[0])
+		if !ok {
+			continue
+		}
+
+		state := records[idx]
+		if state == nil {
+			state = &rocmGPUState{Index: idx}
+			records[idx] = state
+			order = append(order, idx)
+		}
+
+		if len(fields) >= 4 && !rocmLooksLikeMetric(fields[1]) {
+			state.Name = fields[1]
+			state.hasName = state.Name != ""
+			if total, ok := parseROCmUint(fields[2]); ok {
+				state.VRAMTotal = bytesToMiB(total)
+				state.hasTotal = true
+			}
+			if used, ok := parseROCmUint(fields[3]); ok {
+				state.VRAMUsed = bytesToMiB(used)
+				state.hasUsed = true
+			}
+			continue
+		}
+
+		if len(fields) < 3 {
+			continue
+		}
+
+		metric := rocmNormalizeMetric(fields[1])
+		value := fields[2]
+		switch {
+		case rocmMetricIsName(metric):
+			state.Name = value
+			state.hasName = state.Name != ""
+		case rocmMetricIsTotal(metric):
+			if total, ok := parseROCmUint(value); ok {
+				state.VRAMTotal = bytesToMiB(total)
+				state.hasTotal = true
+			}
+		case rocmMetricIsUsed(metric):
+			if used, ok := parseROCmUint(value); ok {
+				state.VRAMUsed = bytesToMiB(used)
+				state.hasUsed = true
+			}
+		}
+	}
+
+	sort.Ints(order)
+	gpus := make([]GPU, 0, len(order))
+	for _, idx := range order {
+		state := records[idx]
+		if state == nil {
+			continue
+		}
+		if !state.hasName && !state.hasTotal && !state.hasUsed {
+			continue
+		}
+		free := uint64(0)
+		if state.VRAMTotal > state.VRAMUsed {
+			free = state.VRAMTotal - state.VRAMUsed
+		}
+		gpus = append(gpus, GPU{
+			Index:     state.Index,
+			Name:      state.Name,
+			VRAMTotal: state.VRAMTotal,
+			VRAMFree:  free,
+			VRAMUsed:  state.VRAMUsed,
+		})
+	}
+	return gpus
+}
+
+func parseROCmGPUIndex(field string) (int, bool) {
+	field = strings.TrimSpace(field)
+	if field == "" {
+		return 0, false
+	}
+	if match := regexp.MustCompile(`(?i)^gpu\[(\d+)\]$`).FindStringSubmatch(field); len(match) == 2 {
+		idx, err := strconv.Atoi(match[1])
+		return idx, err == nil
+	}
+	if idx, err := strconv.Atoi(field); err == nil {
+		return idx, true
+	}
+	return 0, false
+}
+
+func rocmNormalizeMetric(field string) string {
+	field = strings.ToLower(strings.TrimSpace(field))
+	field = strings.ReplaceAll(field, "_", " ")
+	field = strings.ReplaceAll(field, "-", " ")
+	field = strings.ReplaceAll(field, "(", "")
+	field = strings.ReplaceAll(field, ")", "")
+	field = strings.ReplaceAll(field, "  ", " ")
+	return strings.TrimSpace(field)
+}
+
+func rocmLooksLikeMetric(field string) bool {
+	metric := rocmNormalizeMetric(field)
+	return rocmMetricIsName(metric) || rocmMetricIsTotal(metric) || rocmMetricIsUsed(metric)
+}
+
+func rocmMetricIsName(metric string) bool {
+	return strings.Contains(metric, "device name") ||
+		strings.Contains(metric, "product name") ||
+		strings.EqualFold(metric, "name")
+}
+
+func rocmMetricIsTotal(metric string) bool {
+	return strings.Contains(metric, "vram total memory") ||
+		strings.Contains(metric, "total memory") ||
+		strings.Contains(metric, "total vram")
+}
+
+func rocmMetricIsUsed(metric string) bool {
+	return strings.Contains(metric, "vram total used memory") ||
+		strings.Contains(metric, "vram used") ||
+		strings.Contains(metric, "used memory") ||
+		strings.Contains(metric, "used vram")
+}
+
+func parseROCmUint(value string) (uint64, bool) {
+	value = strings.TrimSpace(value)
+	value = strings.Trim(value, `"`)
+	value = strings.ReplaceAll(value, ",", "")
+	if value == "" {
+		return 0, false
+	}
+	fields := strings.Fields(value)
+	if len(fields) == 0 {
+		return 0, false
+	}
+	for i, r := range fields[0] {
+		if r < '0' || r > '9' {
+			fields[0] = fields[0][:i]
+			break
+		}
+	}
+	if fields[0] == "" {
+		return 0, false
+	}
+	v, err := strconv.ParseUint(fields[0], 10, 64)
+	return v, err == nil
 }
 
 var vulkanGPUHeader = regexp.MustCompile(`^GPU([0-9]+):$`)
@@ -361,6 +563,12 @@ func Detect() (*Inventory, error) {
 	gpus, err := DetectGPUs()
 	if err != nil {
 		return nil, fmt.Errorf("GPU detection: %w", err)
+	}
+	if len(gpus) == 0 {
+		gpus, err = detectROCmGPUs()
+		if err != nil {
+			return nil, fmt.Errorf("ROCm GPU detection: %w", err)
+		}
 	}
 	vulkanGPUs, err := DetectVulkanGPUs()
 	if err != nil {
