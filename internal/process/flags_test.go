@@ -706,10 +706,15 @@ func TestComputeFlags_VulkanBackendUsesVulkanGPUs(t *testing.T) {
 	if result.CPUFallback {
 		t.Fatal("expected Vulkan GPU mode, got CPU fallback")
 	}
+	foundLayers := false
 	for i := 0; i < len(result.Flags); i++ {
-		if result.Flags[i] == "--n-gpu-layers" {
-			t.Fatalf("unexpected --n-gpu-layers in Vulkan flags: %v", result.Flags)
+		if result.Flags[i] == "--n-gpu-layers" && i+1 < len(result.Flags) && result.Flags[i+1] == "-1" {
+			foundLayers = true
+			break
 		}
+	}
+	if !foundLayers {
+		t.Fatalf("expected --n-gpu-layers -1 in Vulkan flags, got %v", result.Flags)
 	}
 	hasFlashAttn := false
 	hasNoWarmup := false

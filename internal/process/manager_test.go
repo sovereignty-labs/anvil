@@ -1166,7 +1166,7 @@ func TestStartOptsStart_CPU_Device_Flags(t *testing.T) {
 	// Verify both GPU selectors are empty (GPU hidden in CPU mode)
 	var cudaVisibleDevices string
 	var hipVisibleDevices string
-	var vkDevice string
+	var vkVisibleDevices string
 	for _, env := range proc.cmd.Env {
 		if strings.HasPrefix(env, "CUDA_VISIBLE_DEVICES=") {
 			cudaVisibleDevices = env
@@ -1174,8 +1174,8 @@ func TestStartOptsStart_CPU_Device_Flags(t *testing.T) {
 		if strings.HasPrefix(env, "HIP_VISIBLE_DEVICES=") {
 			hipVisibleDevices = env
 		}
-		if strings.HasPrefix(env, "GGML_VK_DEVICE=") {
-			vkDevice = env
+		if strings.HasPrefix(env, "GGML_VK_VISIBLE_DEVICES=") {
+			vkVisibleDevices = env
 		}
 	}
 	if cudaVisibleDevices != "CUDA_VISIBLE_DEVICES=" {
@@ -1184,8 +1184,8 @@ func TestStartOptsStart_CPU_Device_Flags(t *testing.T) {
 	if hipVisibleDevices != "HIP_VISIBLE_DEVICES=" {
 		t.Errorf("expected HIP_VISIBLE_DEVICES=\"\" in environment, got: %s", hipVisibleDevices)
 	}
-	if vkDevice != "GGML_VK_DEVICE=" {
-		t.Errorf("expected GGML_VK_DEVICE=\"\" in environment, got: %s", vkDevice)
+	if vkVisibleDevices != "GGML_VK_VISIBLE_DEVICES=" {
+		t.Errorf("expected GGML_VK_VISIBLE_DEVICES=\"\" in environment, got: %s", vkVisibleDevices)
 	}
 
 	// Verify GPUIndex is "cpu"
@@ -1223,7 +1223,7 @@ func TestBuildChildEnvCPUFallback(t *testing.T) {
 	env := buildChildEnv(runtimemgr.BuildBackendCUDA, -1, true, "", nil)
 	wantCUDA := "CUDA_VISIBLE_DEVICES="
 	wantHIP := "HIP_VISIBLE_DEVICES="
-	wantVK := "GGML_VK_DEVICE="
+	wantVK := "GGML_VK_VISIBLE_DEVICES="
 	foundCUDA := false
 	foundHIP := false
 	foundVK := false
@@ -1251,16 +1251,16 @@ func TestBuildChildEnvNoGPUIndexLeavesUnset(t *testing.T) {
 		if strings.HasPrefix(e, "CUDA_VISIBLE_DEVICES=") {
 			t.Errorf("expected no CUDA_VISIBLE_DEVICES entry, got %s", e)
 		}
-		if strings.HasPrefix(e, "GGML_VK_DEVICE=") {
-			t.Errorf("expected no GGML_VK_DEVICE entry, got %s", e)
+		if strings.HasPrefix(e, "GGML_VK_VISIBLE_DEVICES=") {
+			t.Errorf("expected no GGML_VK_VISIBLE_DEVICES entry, got %s", e)
 		}
 	}
 }
 
-func TestBuildChildEnvVulkanUsesGGMLVKDevice(t *testing.T) {
-	t.Setenv("GGML_VK_DEVICE", "stale")
+func TestBuildChildEnvVulkanUsesGGMLVKVisibleDevices(t *testing.T) {
+	t.Setenv("GGML_VK_VISIBLE_DEVICES", "stale")
 	env := buildChildEnv(runtimemgr.BuildBackendVulkan, 2, false, "/opt/runtimes/llama-vulkan/llama-server", nil)
-	want := "GGML_VK_DEVICE=2"
+	want := "GGML_VK_VISIBLE_DEVICES=2"
 	found := false
 	for _, e := range env {
 		if e == want {
@@ -1357,9 +1357,9 @@ func TestBuildChildEnvEmptyBinaryPreservesExistingLDP(t *testing.T) {
 
 func TestBuildChildEnvAddsExtraEnv(t *testing.T) {
 	env := buildChildEnv(runtimemgr.BuildBackendCUDA, 0, false, "/opt/runtimes/llama-b9275/llama-server", map[string]string{
-		"GGML_VK_DEVICE": "1",
+		"GGML_VK_VISIBLE_DEVICES": "1",
 	})
-	want := "GGML_VK_DEVICE=1"
+	want := "GGML_VK_VISIBLE_DEVICES=1"
 	for _, e := range env {
 		if e == want {
 			return
