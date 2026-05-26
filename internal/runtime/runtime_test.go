@@ -162,6 +162,17 @@ func TestRuntimeBackendReadsMetadataAndDefaultsToCUDA(t *testing.T) {
 		t.Fatalf("RuntimeBackend() = %q, want vulkan", got)
 	}
 
+	rocmDir := filepath.Join(dir, "llama-rocm")
+	if err := os.MkdirAll(rocmDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(rocmDir, "backend"), []byte("rocm\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if got := mgr.RuntimeBackend("llama-rocm"); got != BuildBackendROCm {
+		t.Fatalf("RuntimeBackend() = %q, want rocm", got)
+	}
+
 	cpuDir := filepath.Join(dir, "llama-cpu")
 	if err := os.MkdirAll(cpuDir, 0o755); err != nil {
 		t.Fatal(err)
@@ -295,6 +306,86 @@ func TestDetectBuildBackendCUDA(t *testing.T) {
 	}
 }
 
+func TestDetectBuildBackendPrefersCUDAOverROCm(t *testing.T) {
+	tmpDir := t.TempDir()
+	nvcc := filepath.Join(tmpDir, "nvcc")
+	hipcc := filepath.Join(tmpDir, "hipcc")
+	for _, path := range []string{nvcc, hipcc} {
+		if err := os.WriteFile(path, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	oldLookPath := execLookPath
+	oldFileStat := fileStat
+	t.Cleanup(func() {
+		execLookPath = oldLookPath
+		fileStat = oldFileStat
+	})
+
+	execLookPath = func(file string) (string, error) {
+		switch file {
+		case "nvcc":
+			return nvcc, nil
+		case "hipcc":
+			return hipcc, nil
+		default:
+			return "", os.ErrNotExist
+		}
+	}
+	fileStat = func(string) (os.FileInfo, error) {
+		return nil, os.ErrNotExist
+	}
+
+	got, err := detectBuildBackend()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.backend != BuildBackendCUDA {
+		t.Fatalf("backend = %q, want cuda", got.backend)
+	}
+}
+
+func TestDetectBuildBackendROCm(t *testing.T) {
+	tmpDir := t.TempDir()
+	hipcc := filepath.Join(tmpDir, "hipcc")
+	if err := os.WriteFile(hipcc, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	oldLookPath := execLookPath
+	oldFileStat := fileStat
+	t.Cleanup(func() {
+		execLookPath = oldLookPath
+		fileStat = oldFileStat
+	})
+
+	execLookPath = func(file string) (string, error) {
+		switch file {
+		case "nvcc":
+			return "", os.ErrNotExist
+		case "hipcc":
+			return hipcc, nil
+		default:
+			return "", os.ErrNotExist
+		}
+	}
+	fileStat = func(string) (os.FileInfo, error) {
+		return nil, os.ErrNotExist
+	}
+
+	got, err := detectBuildBackend()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.backend != BuildBackendROCm {
+		t.Fatalf("backend = %q, want rocm", got.backend)
+	}
+	if got.label != "ROCm (hipcc found)" {
+		t.Fatalf("label = %q", got.label)
+	}
+}
+
 func TestDetectBuildBackendVulkan(t *testing.T) {
 	tmpDir := t.TempDir()
 	glslc := filepath.Join(tmpDir, "glslc")
@@ -410,7 +501,43 @@ func TestResolveBuildBackendVulkanOverridesAuto(t *testing.T) {
 	}
 }
 
+func TestResolveBuildBackendROCmOverridesAuto(t *testing.T) {
+	tmpDir := t.TempDir()
+	hipcc := filepath.Join(tmpDir, "hipcc")
+	if err := os.WriteFile(hipcc, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	oldLookPath := execLookPath
+	oldFileStat := fileStat
+	t.Cleanup(func() {
+		execLookPath = oldLookPath
+		fileStat = oldFileStat
+	})
+
+	execLookPath = func(file string) (string, error) {
+		if file == "hipcc" {
+			return hipcc, nil
+		}
+		return "", os.ErrNotExist
+	}
+	fileStat = func(string) (os.FileInfo, error) {
+		return nil, os.ErrNotExist
+	}
+
+	got, err := resolveBuildBackend("rocm")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.backend != BuildBackendROCm {
+		t.Fatalf("backend = %q, want rocm", got.backend)
+	}
+}
+
 func TestDefaultBuildRuntimeName(t *testing.T) {
+	if got := defaultBuildRuntimeName(BuildBackendROCm, "https://example.com/ggml-org/llama.cpp.git", "main"); got != "llama-rocm" {
+		t.Fatalf("rocm name = %q, want llama-rocm", got)
+	}
 	if got := defaultBuildRuntimeName(BuildBackendVulkan, "https://example.com/ggml-org/llama.cpp.git", "main"); got != "llama-vulkan" {
 		t.Fatalf("vulkan name = %q, want llama-vulkan", got)
 	}
@@ -430,6 +557,44 @@ func TestBuildCMakeArgsIncludesVulkan(t *testing.T) {
 	}
 	if !found {
 		t.Fatalf("expected Vulkan cmake flag in %v", args)
+	}
+}
+
+func TestBuildCMakeArgsIncludesROCm(t *testing.T) {
+	tmpDir := t.TempDir()
+	rocminfo := filepath.Join(tmpDir, "rocminfo")
+	if err := os.WriteFile(rocminfo, []byte("#!/bin/sh\ncat <<'EOF'\nName: gfx90a\nName: gfx1100\nEOF\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	oldLookPath := execLookPath
+	t.Cleanup(func() {
+		execLookPath = oldLookPath
+	})
+
+	execLookPath = func(file string) (string, error) {
+		if file == "rocminfo" {
+			return rocminfo, nil
+		}
+		return "", os.ErrNotExist
+	}
+
+	args := buildCMakeArgs(BuildBackendROCm)
+	hasHIP := false
+	hasTargets := false
+	for _, arg := range args {
+		if arg == "-DGGML_HIP=ON" {
+			hasHIP = true
+		}
+		if strings.HasPrefix(arg, "-DGPU_TARGETS=") && strings.Contains(arg, "gfx90a") && strings.Contains(arg, "gfx1100") {
+			hasTargets = true
+		}
+	}
+	if !hasHIP {
+		t.Fatalf("expected ROCm cmake flag in %v", args)
+	}
+	if !hasTargets {
+		t.Fatalf("expected ROCm GPU targets in %v", args)
 	}
 }
 

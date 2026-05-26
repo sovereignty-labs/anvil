@@ -1165,10 +1165,14 @@ func TestStartOptsStart_CPU_Device_Flags(t *testing.T) {
 
 	// Verify both GPU selectors are empty (GPU hidden in CPU mode)
 	var cudaVisibleDevices string
+	var hipVisibleDevices string
 	var vkDevice string
 	for _, env := range proc.cmd.Env {
 		if strings.HasPrefix(env, "CUDA_VISIBLE_DEVICES=") {
 			cudaVisibleDevices = env
+		}
+		if strings.HasPrefix(env, "HIP_VISIBLE_DEVICES=") {
+			hipVisibleDevices = env
 		}
 		if strings.HasPrefix(env, "GGML_VK_DEVICE=") {
 			vkDevice = env
@@ -1176,6 +1180,9 @@ func TestStartOptsStart_CPU_Device_Flags(t *testing.T) {
 	}
 	if cudaVisibleDevices != "CUDA_VISIBLE_DEVICES=" {
 		t.Errorf("expected CUDA_VISIBLE_DEVICES=\"\" in environment, got: %s", cudaVisibleDevices)
+	}
+	if hipVisibleDevices != "HIP_VISIBLE_DEVICES=" {
+		t.Errorf("expected HIP_VISIBLE_DEVICES=\"\" in environment, got: %s", hipVisibleDevices)
 	}
 	if vkDevice != "GGML_VK_DEVICE=" {
 		t.Errorf("expected GGML_VK_DEVICE=\"\" in environment, got: %s", vkDevice)
@@ -1215,18 +1222,23 @@ func TestBuildChildEnvGPUIsolation(t *testing.T) {
 func TestBuildChildEnvCPUFallback(t *testing.T) {
 	env := buildChildEnv(runtimemgr.BuildBackendCUDA, -1, true, "", nil)
 	wantCUDA := "CUDA_VISIBLE_DEVICES="
+	wantHIP := "HIP_VISIBLE_DEVICES="
 	wantVK := "GGML_VK_DEVICE="
 	foundCUDA := false
+	foundHIP := false
 	foundVK := false
 	for _, e := range env {
 		if e == wantCUDA {
 			foundCUDA = true
 		}
+		if e == wantHIP {
+			foundHIP = true
+		}
 		if e == wantVK {
 			foundVK = true
 		}
 	}
-	if !foundCUDA || !foundVK {
+	if !foundCUDA || !foundHIP || !foundVK {
 		t.Errorf("expected empty GPU selectors, got %v", env)
 	}
 }
@@ -1256,6 +1268,24 @@ func TestBuildChildEnvVulkanUsesGGMLVKDevice(t *testing.T) {
 		}
 		if strings.HasPrefix(e, "CUDA_VISIBLE_DEVICES=") {
 			t.Fatalf("unexpected CUDA selector in Vulkan env: %v", envContainingCUDA(env))
+		}
+	}
+	if !found {
+		t.Fatalf("expected env to contain %q, got %v", want, env)
+	}
+}
+
+func TestBuildChildEnvROCmUsesHIPVisibleDevices(t *testing.T) {
+	t.Setenv("HIP_VISIBLE_DEVICES", "stale")
+	env := buildChildEnv(runtimemgr.BuildBackendROCm, 3, false, "/opt/runtimes/llama-rocm/llama-server", nil)
+	want := "HIP_VISIBLE_DEVICES=3"
+	found := false
+	for _, e := range env {
+		if e == want {
+			found = true
+		}
+		if strings.HasPrefix(e, "CUDA_VISIBLE_DEVICES=") {
+			t.Fatalf("unexpected CUDA selector in ROCm env: %v", envContainingCUDA(env))
 		}
 	}
 	if !found {

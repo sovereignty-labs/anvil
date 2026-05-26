@@ -19,6 +19,7 @@ type buildTools struct {
 	make  string
 	ninja string
 	nvcc  string
+	hipcc string
 }
 
 // checkBuildTools resolves the required toolchain on PATH. Returns an error
@@ -30,6 +31,7 @@ func checkBuildTools() (buildTools, error) {
 		make:  lookPathOrEmpty("make"),
 		ninja: lookPathOrEmpty("ninja"),
 		nvcc:  lookPathOrEmpty("nvcc"),
+		hipcc: lookPathOrEmpty("hipcc"),
 	}
 	var missing []string
 	if t.git == "" {
@@ -75,6 +77,9 @@ func printBuildTools(t buildTools) {
 	}
 	if t.nvcc != "" {
 		row("nvcc", t.nvcc)
+	}
+	if t.hipcc != "" {
+		row("hipcc", t.hipcc)
 	}
 }
 

@@ -296,6 +296,11 @@ func (m *Manager) Build(opts BuildOpts) (*RuntimeInfo, error) {
 	if selection.backend == BuildBackendCUDA && tools.nvcc == "" {
 		return nil, fmt.Errorf("CUDA build requires nvcc on PATH")
 	}
+	if selection.backend == BuildBackendROCm {
+		if err := ensureROCmBuildPrereqs(); err != nil {
+			return nil, err
+		}
+	}
 	if selection.backend == BuildBackendVulkan {
 		if err := ensureVulkanBuildPrereqs(); err != nil {
 			return nil, err

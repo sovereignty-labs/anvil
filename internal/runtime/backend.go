@@ -1,7 +1,10 @@
 package runtime
 
 import (
+	"bufio"
+	"bytes"
 	"fmt"
+	"regexp"
 	"strings"
 )
 
@@ -11,6 +14,7 @@ type BuildBackend string
 const (
 	BuildBackendAuto   BuildBackend = ""
 	BuildBackendCUDA   BuildBackend = "cuda"
+	BuildBackendROCm   BuildBackend = "rocm"
 	BuildBackendVulkan BuildBackend = "vulkan"
 	BuildBackendCPU    BuildBackend = "cpu"
 )
@@ -29,6 +33,11 @@ func resolveBuildBackend(requested string) (backendSelection, error) {
 			return backendSelection{}, fmt.Errorf("cuda build requires nvcc on PATH")
 		}
 		return backendSelection{backend: BuildBackendCUDA, label: "CUDA (forced by --backend)"}, nil
+	case string(BuildBackendROCm):
+		if err := ensureROCmBuildPrereqs(); err != nil {
+			return backendSelection{}, err
+		}
+		return backendSelection{backend: BuildBackendROCm, label: "ROCm (forced by --backend)"}, nil
 	case string(BuildBackendVulkan):
 		if err := ensureVulkanBuildPrereqs(); err != nil {
 			return backendSelection{}, err
@@ -37,13 +46,17 @@ func resolveBuildBackend(requested string) (backendSelection, error) {
 	case string(BuildBackendCPU):
 		return backendSelection{backend: BuildBackendCPU, label: "CPU only (forced by --backend)"}, nil
 	default:
-		return backendSelection{}, fmt.Errorf("invalid backend %q (expected cuda, vulkan, cpu)", requested)
+		return backendSelection{}, fmt.Errorf("invalid backend %q (expected cuda, rocm, vulkan, cpu)", requested)
 	}
 }
 
 func detectBuildBackend() (backendSelection, error) {
 	if lookPathOrEmpty("nvcc") != "" {
 		return backendSelection{backend: BuildBackendCUDA, label: "CUDA (nvcc found)"}, nil
+	}
+
+	if lookPathOrEmpty("hipcc") != "" {
+		return backendSelection{backend: BuildBackendROCm, label: "ROCm (hipcc found)"}, nil
 	}
 
 	if hasPkgConfigVulkan() {
@@ -81,6 +94,15 @@ Install on Ubuntu/Debian: sudo apt install -y libvulkan-dev glslc spirv-headers
 Install on Fedora: sudo dnf install -y vulkan-devel glslc spirv-headers-devel`)
 }
 
+func ensureROCmBuildPrereqs() error {
+	if lookPathOrEmpty("hipcc") != "" {
+		return nil
+	}
+
+	return fmt.Errorf(`ROCm build requires hipcc on PATH
+Install the ROCm HIP toolchain so hipcc is available to cmake`)
+}
+
 func buildCMakeArgs(backend BuildBackend) []string {
 	args := []string{
 		"-B", "build",
@@ -93,6 +115,8 @@ func buildCMakeArgs(backend BuildBackend) []string {
 	switch backend {
 	case BuildBackendCUDA:
 		args = append(args, "-DGGML_CUDA=ON")
+	case BuildBackendROCm:
+		args = append(args, "-DGGML_HIP=ON", "-DGPU_TARGETS="+detectROCmGPUTargets())
 	case BuildBackendVulkan:
 		args = append(args, "-DGGML_VULKAN=ON")
 	}
@@ -102,6 +126,8 @@ func buildCMakeArgs(backend BuildBackend) []string {
 
 func defaultBuildRuntimeName(backend BuildBackend, repo, branch string) string {
 	switch backend {
+	case BuildBackendROCm:
+		return "llama-rocm"
 	case BuildBackendVulkan:
 		return "llama-vulkan"
 	case BuildBackendCPU:
@@ -115,6 +141,8 @@ func (b BuildBackend) String() string {
 	switch b {
 	case BuildBackendCUDA:
 		return string(BuildBackendCUDA)
+	case BuildBackendROCm:
+		return string(BuildBackendROCm)
 	case BuildBackendVulkan:
 		return string(BuildBackendVulkan)
 	case BuildBackendCPU:
@@ -122,4 +150,36 @@ func (b BuildBackend) String() string {
 	default:
 		return "auto"
 	}
+}
+
+var rocmTargetPattern = regexp.MustCompile(`(?i)gfx[0-9a-z]+`)
+
+func detectROCmGPUTargets() string {
+	rocminfo := lookPathOrEmpty("rocminfo")
+	if rocminfo == "" {
+		return "gfx1201"
+	}
+
+	out, err := execCommand(rocminfo).Output()
+	if err != nil || len(out) == 0 {
+		return "gfx1201"
+	}
+
+	seen := make(map[string]struct{})
+	targets := make([]string, 0, 4)
+	scanner := bufio.NewScanner(bytes.NewReader(out))
+	for scanner.Scan() {
+		for _, match := range rocmTargetPattern.FindAllString(scanner.Text(), -1) {
+			target := strings.ToLower(match)
+			if _, ok := seen[target]; ok {
+				continue
+			}
+			seen[target] = struct{}{}
+			targets = append(targets, target)
+		}
+	}
+	if len(targets) == 0 {
+		return "gfx1201"
+	}
+	return strings.Join(targets, ";")
 }
