@@ -90,7 +90,7 @@ func ComputeFlags(meta *model.GGUFMetadata, modelPath string, inv *hardware.Inve
 	requiredVRAM := fileSizeMB + (fileSizeMB*20)/100
 	result.VRAMUsedMB = requiredVRAM
 
-	var bestCUDA *hardware.GPU
+	var bestGPU *hardware.GPU
 	var bestVulkan *hardware.VulkanGPU
 	var availableVRAM uint64
 
@@ -100,21 +100,21 @@ func ComputeFlags(meta *model.GGUFMetadata, modelPath string, inv *hardware.Inve
 	case runtimemgr.BuildBackendVulkan:
 		bestVulkan, _, availableVRAM = selectBestVulkanGPU(inv.VulkanGPUs, requiredVRAM)
 	default:
-		bestCUDA, _, availableVRAM = selectBestGPU(inv.GPUs, requiredVRAM)
+		bestGPU, _, availableVRAM = selectBestGPU(inv.GPUs, requiredVRAM)
 	}
 
-	if !result.CPUFallback && (bestCUDA != nil || bestVulkan != nil) {
+	if !result.CPUFallback && (bestGPU != nil || bestVulkan != nil) {
 		result.Flags = append(result.Flags,
 			"--flash-attn", "on",
 			"--no-warmup",
 		)
-		if bestCUDA != nil {
+		if effectiveBackend != runtimemgr.BuildBackendVulkan {
 			result.Flags = append(result.Flags, "--n-gpu-layers", "99")
 		}
 		result.VRAMTotalMB = availableVRAM
-		if bestCUDA != nil {
-			result.SelectedDevice = fmt.Sprintf("%s:%d", effectiveBackend, bestCUDA.Index)
-			result.GPUIndex = bestCUDA.Index
+		if bestGPU != nil {
+			result.SelectedDevice = fmt.Sprintf("%s:%d", effectiveBackend, bestGPU.Index)
+			result.GPUIndex = bestGPU.Index
 		} else {
 			result.SelectedDevice = fmt.Sprintf("%s:%d", effectiveBackend, bestVulkan.Index)
 			result.GPUIndex = bestVulkan.Index
@@ -150,7 +150,7 @@ func normalizeBackend(backend ...runtimemgr.BuildBackend) runtimemgr.BuildBacken
 		return runtimemgr.BuildBackendCUDA
 	}
 	switch backend[0] {
-	case runtimemgr.BuildBackendCUDA, runtimemgr.BuildBackendVulkan, runtimemgr.BuildBackendCPU:
+	case runtimemgr.BuildBackendCUDA, runtimemgr.BuildBackendROCm, runtimemgr.BuildBackendVulkan, runtimemgr.BuildBackendCPU:
 		return backend[0]
 	default:
 		return runtimemgr.BuildBackendCUDA

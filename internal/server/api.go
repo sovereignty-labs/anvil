@@ -562,10 +562,10 @@ func describeDevice(gpuIndex string, inv *hardware.Inventory) string {
 	if gpuIndex == "" || gpuIndex == "cpu" {
 		return "cpu"
 	}
-	if !strings.HasPrefix(gpuIndex, "cuda:") && !strings.HasPrefix(gpuIndex, "vulkan:") {
+	if !strings.HasPrefix(gpuIndex, "cuda:") && !strings.HasPrefix(gpuIndex, "rocm:") && !strings.HasPrefix(gpuIndex, "vulkan:") {
 		return gpuIndex
 	}
-	idxStr := strings.TrimPrefix(strings.TrimPrefix(gpuIndex, "cuda:"), "vulkan:")
+	idxStr := strings.TrimPrefix(strings.TrimPrefix(strings.TrimPrefix(gpuIndex, "cuda:"), "rocm:"), "vulkan:")
 	idx, err := strconv.Atoi(idxStr)
 	if err != nil {
 		return gpuIndex
