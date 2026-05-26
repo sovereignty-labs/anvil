@@ -32,11 +32,8 @@ func TestDetectGPUs(t *testing.T) {
 }
 
 func TestParseROCmSMICSVWithOneAMDGPU(t *testing.T) {
-	out := `
-GPU,Metric,Value
-GPU[0],Device Name,AMD Radeon RX 7900 XTX
-GPU[0],VRAM Total Memory (B),25769803776
-GPU[0],VRAM Total Used Memory (B),8388608
+	out := `device,VRAM Total Memory (B),VRAM Total Used Memory (B),Card Series,Card Model,Card Vendor,Card SKU,Subsystem ID,Device Rev,Node ID,GUID,GFX Version
+card0,34208743424,59953152,AMD Radeon Graphics,0x7551,Advanced Micro Devices Inc. [AMD/ATI],APM107573,0x5413,0xc0,1,2277,gfx1201
 `
 
 	gpus := parseROCmSMICSV(out)
@@ -47,17 +44,41 @@ GPU[0],VRAM Total Used Memory (B),8388608
 	if gpu.Index != 0 {
 		t.Fatalf("Index = %d, want 0", gpu.Index)
 	}
-	if gpu.Name != "AMD Radeon RX 7900 XTX" {
-		t.Fatalf("Name = %q, want AMD Radeon RX 7900 XTX", gpu.Name)
+	if gpu.Name != "AMD Radeon Graphics" {
+		t.Fatalf("Name = %q, want AMD Radeon Graphics", gpu.Name)
 	}
-	if gpu.VRAMTotal != 24576 {
-		t.Fatalf("VRAMTotal = %d, want 24576", gpu.VRAMTotal)
+	if gpu.VRAMTotal != 32624 {
+		t.Fatalf("VRAMTotal = %d, want 32624", gpu.VRAMTotal)
 	}
-	if gpu.VRAMUsed != 8 {
-		t.Fatalf("VRAMUsed = %d, want 8", gpu.VRAMUsed)
+	if gpu.VRAMUsed != 57 {
+		t.Fatalf("VRAMUsed = %d, want 57", gpu.VRAMUsed)
 	}
-	if gpu.VRAMFree != 24568 {
-		t.Fatalf("VRAMFree = %d, want 24568", gpu.VRAMFree)
+	if gpu.VRAMFree != 32567 {
+		t.Fatalf("VRAMFree = %d, want 32567", gpu.VRAMFree)
+	}
+}
+
+func TestParseROCmSMICSVWithMultipleAMDGPUs(t *testing.T) {
+	out := `device,VRAM Total Memory (B),VRAM Total Used Memory (B),Card Series
+card0,34208743424,59953152,AMD Radeon RX 7900 XTX
+card1,17179869184,8388608,AMD Radeon RX 7800 XT
+`
+
+	gpus := parseROCmSMICSV(out)
+	if len(gpus) != 2 {
+		t.Fatalf("expected 2 ROCm GPUs, got %d", len(gpus))
+	}
+	if gpus[0].Index != 0 || gpus[0].Name != "AMD Radeon RX 7900 XTX" {
+		t.Fatalf("unexpected GPU0 parse: %+v", gpus[0])
+	}
+	if gpus[0].VRAMTotal != 32624 || gpus[0].VRAMUsed != 57 || gpus[0].VRAMFree != 32567 {
+		t.Fatalf("unexpected GPU0 VRAM values: %+v", gpus[0])
+	}
+	if gpus[1].Index != 1 || gpus[1].Name != "AMD Radeon RX 7800 XT" {
+		t.Fatalf("unexpected GPU1 parse: %+v", gpus[1])
+	}
+	if gpus[1].VRAMTotal != 16384 || gpus[1].VRAMUsed != 8 || gpus[1].VRAMFree != 16376 {
+		t.Fatalf("unexpected GPU1 VRAM values: %+v", gpus[1])
 	}
 }
 
@@ -77,10 +98,8 @@ func TestDetectWithNoNVIDIAGPUsPopulatesROCmGPUs(t *testing.T) {
 	writeExecutableScript(t, dir, "nvidia-smi", "#!/bin/sh\nexit 0\n")
 	writeExecutableScript(t, dir, "rocm-smi", `#!/bin/sh
 printf '%s\n' \
-  'GPU,Metric,Value' \
-  'GPU[0],Device Name,AMD Radeon RX 7900 XTX' \
-  'GPU[0],VRAM Total Memory (B),25769803776' \
-  'GPU[0],VRAM Total Used Memory (B),8388608'
+  'device,VRAM Total Memory (B),VRAM Total Used Memory (B),Card Series,Card Model,Card Vendor,Card SKU,Subsystem ID,Device Rev,Node ID,GUID,GFX Version' \
+  'card0,34208743424,59953152,AMD Radeon Graphics,0x7551,Advanced Micro Devices Inc. [AMD/ATI],APM107573,0x5413,0xc0,1,2277,gfx1201'
 `)
 	t.Setenv("PATH", dir)
 
@@ -95,10 +114,10 @@ printf '%s\n' \
 		t.Fatalf("expected 1 ROCm GPU from fallback, got %d", len(inv.ROCmGPUs))
 	}
 	gpu := inv.ROCmGPUs[0]
-	if gpu.Name != "AMD Radeon RX 7900 XTX" {
+	if gpu.Name != "AMD Radeon Graphics" {
 		t.Fatalf("unexpected GPU name: %+v", gpu)
 	}
-	if gpu.VRAMTotal != 24576 || gpu.VRAMUsed != 8 || gpu.VRAMFree != 24568 {
+	if gpu.VRAMTotal != 32624 || gpu.VRAMUsed != 57 || gpu.VRAMFree != 32567 {
 		t.Fatalf("unexpected GPU VRAM values: %+v", gpu)
 	}
 }
@@ -111,10 +130,8 @@ printf '%s\n' \
 `)
 	writeExecutableScript(t, dir, "rocm-smi", `#!/bin/sh
 printf '%s\n' \
-  'GPU,Metric,Value' \
-  'GPU[0],Device Name,AMD Radeon RX 7900 XTX' \
-  'GPU[0],VRAM Total Memory (B),25769803776' \
-  'GPU[0],VRAM Total Used Memory (B),8388608'
+  'device,VRAM Total Memory (B),VRAM Total Used Memory (B),Card Series,Card Model,Card Vendor,Card SKU,Subsystem ID,Device Rev,Node ID,GUID,GFX Version' \
+  'card0,34208743424,59953152,AMD Radeon Graphics,0x7551,Advanced Micro Devices Inc. [AMD/ATI],APM107573,0x5413,0xc0,1,2277,gfx1201'
 `)
 	t.Setenv("PATH", dir)
 
@@ -131,7 +148,7 @@ printf '%s\n' \
 	if len(inv.ROCmGPUs) != 1 {
 		t.Fatalf("expected 1 ROCm GPU, got %d", len(inv.ROCmGPUs))
 	}
-	if inv.ROCmGPUs[0].Name != "AMD Radeon RX 7900 XTX" {
+	if inv.ROCmGPUs[0].Name != "AMD Radeon Graphics" {
 		t.Fatalf("unexpected ROCm GPU: %+v", inv.ROCmGPUs[0])
 	}
 }
