@@ -14,8 +14,11 @@ jobs:
     steps:
       - name: Install tools
         run: apk add --no-cache docker-cli curl jq
-      - name: Trust CA
-        run: update-ca-certificates
+      - name: Trust CA for Docker
+        run: |
+          update-ca-certificates 2>/dev/null || true
+          mkdir -p /etc/docker/certs.d/git.hirdforge.com
+          cp /usr/local/share/ca-certificates/hirdforge-ca.crt /etc/docker/certs.d/git.hirdforge.com/ca.crt
       - name: Registry login
         run: echo $REGISTRY_PASSWORD | docker login git.hirdforge.com -u $REGISTRY_USER --password-stdin
       - name: Clone repository
