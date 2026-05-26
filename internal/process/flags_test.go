@@ -185,7 +185,7 @@ func TestComputeFlags_GPU_Success(t *testing.T) {
 	}
 }
 
-func TestComputeFlags_ROCmBackendUsesCUDAInventory(t *testing.T) {
+func TestComputeFlags_ROCmBackendUsesROCmInventory(t *testing.T) {
 	dir := t.TempDir()
 	modelPath, meta := writeTestGGUF(t, dir, "model.gguf", 4*1024*1024*1024, []modelTestKV{
 		{"general.architecture", "llama"},
@@ -199,8 +199,11 @@ func TestComputeFlags_ROCmBackendUsesCUDAInventory(t *testing.T) {
 
 	inv := &hardware.Inventory{
 		GPUs: []hardware.GPU{
-			{Index: 0, Name: "AMD Radeon RX 7900 XTX", VRAMTotal: 24576, VRAMFree: 18000, VRAMUsed: 6576},
-			{Index: 1, Name: "AMD Radeon RX 7800 XT", VRAMTotal: 16384, VRAMFree: 15000, VRAMUsed: 1384},
+			{Index: 0, Name: "NVIDIA GeForce RTX 2060", VRAMTotal: 6144, VRAMFree: 2000, VRAMUsed: 4144},
+		},
+		ROCmGPUs: []hardware.GPU{
+			{Index: 1, Name: "AMD Radeon RX 7900 XTX", VRAMTotal: 24576, VRAMFree: 18000, VRAMUsed: 6576},
+			{Index: 2, Name: "AMD Radeon RX 7800 XT", VRAMTotal: 16384, VRAMFree: 15000, VRAMUsed: 1384},
 		},
 		CPU: hardware.CPU{Cores: 16, Threads: 32},
 	}
@@ -212,8 +215,8 @@ func TestComputeFlags_ROCmBackendUsesCUDAInventory(t *testing.T) {
 	if result.Backend != runtimemgr.BuildBackendROCm {
 		t.Fatalf("Backend = %q, want rocm", result.Backend)
 	}
-	if result.SelectedDevice != "rocm:0" {
-		t.Fatalf("SelectedDevice = %q, want rocm:0", result.SelectedDevice)
+	if result.SelectedDevice != "rocm:1" {
+		t.Fatalf("SelectedDevice = %q, want rocm:1", result.SelectedDevice)
 	}
 	foundLayers := false
 	for i := 0; i < len(result.Flags); i++ {
@@ -622,13 +625,13 @@ func TestGPUReasoning_VulkanBackend(t *testing.T) {
 
 func TestGPUReasoning_ROCmBackend(t *testing.T) {
 	inv := &hardware.Inventory{
-		GPUs: []hardware.GPU{
-			{Index: 0, Name: "AMD Radeon RX 7900 XTX", VRAMTotal: 24576, VRAMFree: 18000, VRAMUsed: 6576},
+		ROCmGPUs: []hardware.GPU{
+			{Index: 1, Name: "AMD Radeon RX 7900 XTX", VRAMTotal: 24576, VRAMFree: 18000, VRAMUsed: 6576},
 		},
 	}
 	reasoning := GPUReasoning(inv, 4096, runtimemgr.BuildBackendROCm)
 	if !strings.Contains(reasoning, "AMD Radeon RX 7900 XTX") {
-		t.Fatalf("expected ROCm reasoning to use CUDA-style GPU inventory, got %q", reasoning)
+		t.Fatalf("expected ROCm reasoning to use ROCm GPU inventory, got %q", reasoning)
 	}
 	if strings.Contains(reasoning, "CPU fallback") {
 		t.Fatalf("expected ROCm backend to avoid CPU fallback when GPU fits, got %q", reasoning)

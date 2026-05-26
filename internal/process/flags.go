@@ -99,6 +99,8 @@ func ComputeFlags(meta *model.GGUFMetadata, modelPath string, inv *hardware.Inve
 		applyCPUFallback(result, meta, inv)
 	case runtimemgr.BuildBackendVulkan:
 		bestVulkan, _, availableVRAM = selectBestVulkanGPU(inv.VulkanGPUs, requiredVRAM)
+	case runtimemgr.BuildBackendROCm:
+		bestGPU, _, availableVRAM = selectBestGPU(inv.ROCmGPUs, requiredVRAM)
 	default:
 		bestGPU, _, availableVRAM = selectBestGPU(inv.GPUs, requiredVRAM)
 	}
@@ -418,13 +420,19 @@ func GPUReasoning(inv *hardware.Inventory, requiredVRAM uint64, backend ...runti
 		}
 		return strings.Join(lines, "\n")
 	}
-	if len(inv.GPUs) == 0 {
-		return "No GPU detected — will use CPU"
+	gpus := inv.GPUs
+	gpuLabel := "GPU"
+	if effectiveBackend == runtimemgr.BuildBackendROCm {
+		gpus = inv.ROCmGPUs
+		gpuLabel = "ROCm GPU"
+	}
+	if len(gpus) == 0 {
+		return fmt.Sprintf("No %s detected — will use CPU", gpuLabel)
 	}
 	lines = append(lines, fmt.Sprintf("Required VRAM: %s (model %s + 20%% KV cache overhead)",
 		FormatMB(requiredVRAM), FormatMB(requiredVRAM-(requiredVRAM*20/100))))
 
-	bestGPU, _, availableVRAM := selectBestGPU(inv.GPUs, requiredVRAM)
+	bestGPU, _, availableVRAM := selectBestGPU(gpus, requiredVRAM)
 	if bestGPU != nil {
 		lines = append(lines, fmt.Sprintf("Selected: GPU %d (%s) with %s free (%s headroom)",
 			bestGPU.Index,
@@ -432,7 +440,7 @@ func GPUReasoning(inv *hardware.Inventory, requiredVRAM uint64, backend ...runti
 			FormatMB(availableVRAM),
 			FormatMB(availableVRAM-requiredVRAM)))
 	} else {
-		for _, g := range inv.GPUs {
+		for _, g := range gpus {
 			lines = append(lines, fmt.Sprintf("  GPU %d (%s): %s free, insufficient (need %s)",
 				g.Index,
 				g.DisplayName(),

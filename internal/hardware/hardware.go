@@ -55,6 +55,7 @@ func (c *CPU) RAMFreeGB() float64  { return float64(c.RAMFreeMB) / 1024.0 }
 
 type Inventory struct {
 	GPUs       []GPU
+	ROCmGPUs   []GPU
 	VulkanGPUs []VulkanGPU
 	CPU        CPU
 }
@@ -564,11 +565,9 @@ func Detect() (*Inventory, error) {
 	if err != nil {
 		return nil, fmt.Errorf("GPU detection: %w", err)
 	}
-	if len(gpus) == 0 {
-		gpus, err = detectROCmGPUs()
-		if err != nil {
-			return nil, fmt.Errorf("ROCm GPU detection: %w", err)
-		}
+	rocmGPUs, err := detectROCmGPUs()
+	if err != nil {
+		return nil, fmt.Errorf("ROCm GPU detection: %w", err)
 	}
 	vulkanGPUs, err := DetectVulkanGPUs()
 	if err != nil {
@@ -578,5 +577,5 @@ func Detect() (*Inventory, error) {
 	if err != nil {
 		return nil, fmt.Errorf("CPU detection: %w", err)
 	}
-	return &Inventory{GPUs: gpus, VulkanGPUs: vulkanGPUs, CPU: cpu}, nil
+	return &Inventory{GPUs: gpus, ROCmGPUs: rocmGPUs, VulkanGPUs: vulkanGPUs, CPU: cpu}, nil
 }
