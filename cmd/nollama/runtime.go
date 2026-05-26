@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"strings"
 	"text/tabwriter"
 
 	runtimemgr "github.com/sovereignty-labs/nollama/internal/runtime"
@@ -15,6 +16,7 @@ var (
 	runtimeBuildBranch  string
 	runtimeBuildName    string
 	runtimeBuildBackend string
+	runtimeAddBackend   string
 )
 
 func init() {
@@ -27,6 +29,7 @@ func init() {
 	runtimeBuildCmd.RunE = runRuntimeBuild
 	runtimeBuildCmd.Short = "Build llama-server from source"
 	runtimeBuildCmd.Long = "Clone and compile llama.cpp (or a fork) from source. Requires git, cmake, and a C/C++ compiler. Backend auto-detection prefers CUDA (nvcc), then Vulkan, then CPU-only."
+	runtimeAddCmd.Flags().StringVar(&runtimeAddBackend, "backend", "cuda", "Backend metadata to record for the added runtime (cuda, vulkan, cpu)")
 }
 
 func runRuntimeInstall(_ *cobra.Command, _ []string) error {
@@ -103,7 +106,7 @@ func runRuntimeUse(_ *cobra.Command, args []string) error {
 
 func runRuntimeAdd(_ *cobra.Command, args []string) error {
 	mgr := runtimemgr.NewManager()
-	if err := mgr.Add(args[0], args[1]); err != nil {
+	if err := mgr.Add(args[0], args[1], runtimemgr.BuildBackend(strings.TrimSpace(runtimeAddBackend))); err != nil {
 		return err
 	}
 

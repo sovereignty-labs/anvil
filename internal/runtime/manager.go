@@ -222,6 +222,9 @@ func (m *Manager) Install(version string) (*RuntimeInfo, error) {
 	if err := writeSourceMarker(workDir, "release"); err != nil {
 		return nil, err
 	}
+	if err := writeBackendMarker(workDir, BuildBackendCPU); err != nil {
+		return nil, err
+	}
 
 	if err := os.RemoveAll(finalDir); err != nil {
 		return nil, fmt.Errorf("remove existing runtime %s: %w", finalDir, err)
@@ -361,6 +364,9 @@ func (m *Manager) Build(opts BuildOpts) (*RuntimeInfo, error) {
 	if err := writeSourceMarker(workDir, "build"); err != nil {
 		return nil, err
 	}
+	if err := writeBackendMarker(workDir, selection.backend); err != nil {
+		return nil, err
+	}
 
 	if err := os.RemoveAll(finalDir); err != nil {
 		return nil, fmt.Errorf("remove existing runtime %s: %w", finalDir, err)
@@ -459,12 +465,15 @@ func (m *Manager) Use(name string) error {
 }
 
 // Add registers an external llama-server binary.
-func (m *Manager) Add(name, binaryPath string) error {
+func (m *Manager) Add(name, binaryPath string, backend BuildBackend) error {
 	if err := m.ensureDir(); err != nil {
 		return fmt.Errorf("prepare runtimes dir: %w", err)
 	}
 	if err := validateRuntimeName(name); err != nil {
 		return err
+	}
+	if strings.TrimSpace(string(backend)) == "" {
+		backend = BuildBackendCUDA
 	}
 
 	srcInfo, err := os.Stat(binaryPath)
@@ -500,6 +509,9 @@ func (m *Manager) Add(name, binaryPath string) error {
 	if err := writeSourceMarker(workDir, "custom"); err != nil {
 		return err
 	}
+	if err := writeBackendMarker(workDir, backend); err != nil {
+		return err
+	}
 
 	if err := os.RemoveAll(destDir); err != nil {
 		return fmt.Errorf("remove existing runtime %s: %w", destDir, err)
@@ -509,6 +521,24 @@ func (m *Manager) Add(name, binaryPath string) error {
 	}
 	cleanup = false
 	return nil
+}
+
+// RuntimeBackend reads the backend metadata for the named runtime.
+// Runtimes without metadata are assumed to be CUDA.
+func (m *Manager) RuntimeBackend(name string) BuildBackend {
+	dir, err := m.runtimeDir(name)
+	if err != nil {
+		return BuildBackendCUDA
+	}
+	data, err := os.ReadFile(filepath.Join(dir, "backend"))
+	if err != nil {
+		return BuildBackendCUDA
+	}
+	backend := BuildBackend(strings.TrimSpace(string(data)))
+	if backend == "" {
+		return BuildBackendCUDA
+	}
+	return backend
 }
 
 // ResolveNamed returns the llama-server binary for the named runtime.
@@ -644,6 +674,10 @@ func readSourceMarker(dir string) string {
 
 func writeSourceMarker(dir, source string) error {
 	return os.WriteFile(filepath.Join(dir, sourceFileName), []byte(source+"\n"), 0o644)
+}
+
+func writeBackendMarker(dir string, backend BuildBackend) error {
+	return os.WriteFile(filepath.Join(dir, "backend"), []byte(string(backend)+"\n"), 0o644)
 }
 
 func copyFile(src, dst string) error {

@@ -265,11 +265,16 @@ func (s *Server) autoloadModels(hw *hardware.Inventory) {
 // Returns the port the process is listening on.
 func (s *Server) loadModel(entry config.AutoloadEntry, hw *hardware.Inventory) (int, error) {
 	modelPath := s.cfg.ModelPath(entry.Model)
+	_, backend, err := s.resolveLlamaServerPathAndBackend()
+	if err != nil {
+		return 0, err
+	}
 
 	// Build the StartOpts from the autoload entry
 	opts := process.StartOpts{
 		ModelPath:   modelPath,
 		LlamaServer: s.cfg.LlamaServer,
+		Backend:     backend,
 		PinnedPort:  entry.Port,
 	}
 

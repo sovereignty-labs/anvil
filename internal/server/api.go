@@ -343,7 +343,7 @@ func (s *Server) handleLoad(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	llamaServer, err := s.resolveLlamaServerPath()
+	llamaServer, backend, err := s.resolveLlamaServerPathAndBackend()
 	if err != nil {
 		writeAPIError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -353,7 +353,7 @@ func (s *Server) handleLoad(w http.ResponseWriter, r *http.Request) {
 	if req.CPU {
 		computeInv = cloneInventoryWithoutGPUs(hw)
 	} else if req.GPU != nil && *req.GPU >= 0 {
-		computeInv, err = inventoryWithGPU(hw, *req.GPU)
+		computeInv, err = inventoryWithGPU(hw, *req.GPU, backend)
 		if err != nil {
 			writeAPIError(w, http.StatusBadRequest, err.Error())
 			return
@@ -361,7 +361,7 @@ func (s *Server) handleLoad(w http.ResponseWriter, r *http.Request) {
 	}
 
 	modelIndex := s.nextModelIndex()
-	result, err := process.ComputeFlags(meta, modelPath, computeInv, llamaServer, modelIndex)
+	result, err := process.ComputeFlags(meta, modelPath, computeInv, llamaServer, modelIndex, backend)
 	if err != nil {
 		writeAPIError(w, http.StatusBadRequest, err.Error())
 		return
@@ -470,15 +470,25 @@ func (s *Server) handleModels(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) resolveLlamaServerPath() (string, error) {
+	path, _, err := s.resolveLlamaServerPathAndBackend()
+	return path, err
+}
+
+func (s *Server) resolveLlamaServerPathAndBackend() (string, runtimemgr.BuildBackend, error) {
 	if s.cfg != nil && s.cfg.LlamaServer != "" {
-		return s.cfg.LlamaServer, nil
+		return s.cfg.LlamaServer, runtimemgr.BuildBackendCUDA, nil
 	}
 
-	path, err := runtimemgr.NewManager().Resolve()
+	mgr := runtimemgr.NewManager()
+	activeName, err := mgr.ActiveName()
 	if err != nil {
-		return "", err
+		return "", runtimemgr.BuildBackendCUDA, err
 	}
-	return path, nil
+	path, err := mgr.Resolve()
+	if err != nil {
+		return "", runtimemgr.BuildBackendCUDA, err
+	}
+	return path, mgr.RuntimeBackend(activeName), nil
 }
 
 func (s *Server) nextModelIndex() int {
@@ -517,18 +527,32 @@ func cloneInventoryWithoutGPUs(inv *hardware.Inventory) *hardware.Inventory {
 	}
 	clone := *inv
 	clone.GPUs = nil
+	clone.VulkanGPUs = nil
 	return &clone
 }
 
-func inventoryWithGPU(inv *hardware.Inventory, gpuIndex int) (*hardware.Inventory, error) {
+func inventoryWithGPU(inv *hardware.Inventory, gpuIndex int, backend runtimemgr.BuildBackend) (*hardware.Inventory, error) {
 	if inv == nil {
 		return nil, fmt.Errorf("hardware inventory is nil")
 	}
-	for _, gpu := range inv.GPUs {
-		if gpu.Index == gpuIndex {
-			clone := *inv
-			clone.GPUs = []hardware.GPU{gpu}
-			return &clone, nil
+	switch backend {
+	case runtimemgr.BuildBackendVulkan:
+		for _, gpu := range inv.VulkanGPUs {
+			if gpu.Index == gpuIndex {
+				clone := *inv
+				clone.GPUs = nil
+				clone.VulkanGPUs = []hardware.VulkanGPU{gpu}
+				return &clone, nil
+			}
+		}
+	default:
+		for _, gpu := range inv.GPUs {
+			if gpu.Index == gpuIndex {
+				clone := *inv
+				clone.GPUs = []hardware.GPU{gpu}
+				clone.VulkanGPUs = nil
+				return &clone, nil
+			}
 		}
 	}
 	return nil, fmt.Errorf("GPU %d not available", gpuIndex)
@@ -538,18 +562,27 @@ func describeDevice(gpuIndex string, inv *hardware.Inventory) string {
 	if gpuIndex == "" || gpuIndex == "cpu" {
 		return "cpu"
 	}
-	if !strings.HasPrefix(gpuIndex, "cuda:") {
+	if !strings.HasPrefix(gpuIndex, "cuda:") && !strings.HasPrefix(gpuIndex, "vulkan:") {
 		return gpuIndex
 	}
-	idxStr := strings.TrimPrefix(gpuIndex, "cuda:")
+	idxStr := strings.TrimPrefix(strings.TrimPrefix(gpuIndex, "cuda:"), "vulkan:")
 	idx, err := strconv.Atoi(idxStr)
 	if err != nil {
 		return gpuIndex
 	}
 	if inv != nil {
-		for _, gpu := range inv.GPUs {
-			if gpu.Index == idx {
-				return fmt.Sprintf("GPU %d (%s)", gpu.Index, gpu.DisplayName())
+		switch {
+		case strings.HasPrefix(gpuIndex, "vulkan:"):
+			for _, gpu := range inv.VulkanGPUs {
+				if gpu.Index == idx {
+					return fmt.Sprintf("GPU %d (%s)", gpu.Index, gpu.Name)
+				}
+			}
+		default:
+			for _, gpu := range inv.GPUs {
+				if gpu.Index == idx {
+					return fmt.Sprintf("GPU %d (%s)", gpu.Index, gpu.DisplayName())
+				}
 			}
 		}
 	}

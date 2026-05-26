@@ -7,11 +7,13 @@ import (
 
 	"github.com/sovereignty-labs/nollama/internal/hardware"
 	"github.com/sovereignty-labs/nollama/internal/model"
+	runtimemgr "github.com/sovereignty-labs/nollama/internal/runtime"
 )
 
 // Result holds the computed flags, device selection, and metadata for a model load.
 type Result struct {
-	SelectedDevice string   // "cuda:0", "cuda:1", "cpu", etc.
+	SelectedDevice string // "cuda:0", "vulkan:1", "cpu", etc.
+	Backend        runtimemgr.BuildBackend
 	Flags          []string // llama-server flags as []string
 	Command        string   // full command line string
 	VRAMUsedMB     uint64   // estimated VRAM usage in MiB
@@ -56,7 +58,7 @@ func OverrideResultPort(result *Result, port int) {
 
 // ComputeFlags takes a GGUF model (with its path), hardware inventory and returns the
 // optimal llama-server flags for loading the model.
-func ComputeFlags(meta *model.GGUFMetadata, modelPath string, inv *hardware.Inventory, llamaServerPath string, modelIndex int) (*Result, error) {
+func ComputeFlags(meta *model.GGUFMetadata, modelPath string, inv *hardware.Inventory, llamaServerPath string, modelIndex int, backend ...runtimemgr.BuildBackend) (*Result, error) {
 	if llamaServerPath == "" {
 		return nil, fmt.Errorf("llama-server path is required")
 	}
@@ -65,8 +67,16 @@ func ComputeFlags(meta *model.GGUFMetadata, modelPath string, inv *hardware.Inve
 	}
 
 	port := 11434 + modelIndex
+	effectiveBackend := normalizeBackend(backend...)
+	if effectiveBackend == runtimemgr.BuildBackendAuto {
+		effectiveBackend = runtimemgr.BuildBackendCUDA
+	}
+	if inv == nil {
+		inv = &hardware.Inventory{}
+	}
 
 	result := &Result{
+		Backend: effectiveBackend,
 		Flags: []string{
 			"--model", modelPath,
 			"--host", "0.0.0.0",
@@ -77,21 +87,36 @@ func ComputeFlags(meta *model.GGUFMetadata, modelPath string, inv *hardware.Inve
 
 	// Estimate required VRAM: file size + 20% overhead for KV cache
 	fileSizeMB := uint64(meta.FileSizeBytes) / 1024 / 1024
-	requiredVRAM := fileSizeMB + (fileSizeMB * 20) / 100
+	requiredVRAM := fileSizeMB + (fileSizeMB*20)/100
 	result.VRAMUsedMB = requiredVRAM
 
-	// Try to find the best GPU
-	bestGPU, _, availableVRAM := selectBestGPU(inv.GPUs, requiredVRAM)
+	var bestCUDA *hardware.GPU
+	var bestVulkan *hardware.VulkanGPU
+	var availableVRAM uint64
 
-	if bestGPU != nil {
-		result.SelectedDevice = fmt.Sprintf("cuda:%d", bestGPU.Index)
-		result.GPUIndex = bestGPU.Index
+	switch effectiveBackend {
+	case runtimemgr.BuildBackendCPU:
+		applyCPUFallback(result, meta, inv)
+	case runtimemgr.BuildBackendVulkan:
+		bestVulkan, _, availableVRAM = selectBestVulkanGPU(inv.VulkanGPUs, requiredVRAM)
+	default:
+		bestCUDA, _, availableVRAM = selectBestGPU(inv.GPUs, requiredVRAM)
+	}
+
+	if !result.CPUFallback && (bestCUDA != nil || bestVulkan != nil) {
 		result.Flags = append(result.Flags,
 			"--n-gpu-layers", "99",
 			"--flash-attn", "on",
 			"--no-warmup",
 		)
 		result.VRAMTotalMB = availableVRAM
+		if bestCUDA != nil {
+			result.SelectedDevice = fmt.Sprintf("%s:%d", effectiveBackend, bestCUDA.Index)
+			result.GPUIndex = bestCUDA.Index
+		} else {
+			result.SelectedDevice = fmt.Sprintf("%s:%d", effectiveBackend, bestVulkan.Index)
+			result.GPUIndex = bestVulkan.Index
+		}
 
 		// Context size: start from GGUF metadata, cap by available VRAM
 		ctxSize := int(meta.ContextLength)
@@ -108,50 +133,66 @@ func ComputeFlags(meta *model.GGUFMetadata, modelPath string, inv *hardware.Inve
 		if meta.HasChatTemplate {
 			result.Flags = append(result.Flags, "--jinja")
 		}
-	} else {
-		// CPU fallback
-		result.CPUFallback = true
-		result.SelectedDevice = "cpu"
-		result.Flags = append(result.Flags,
-			"--n-gpu-layers", "0",
-			"--no-warmup",
-		)
-		result.VRAMTotalMB = 0
-
-		// Context size: still cap against available system RAM
-		ctxSize := int(meta.ContextLength)
-		if ctxSize > 0 {
-			capped := capContextByVRAM(ctxSize, meta, inv.CPU.RAMFreeMB)
-			if capped < ctxSize {
-				result.Flags = append(result.Flags,
-					"--ctx-size", fmt.Sprintf("%d", capped),
-				)
-			}
-		}
-
-		// --jinja if the model has a chat template
-		if meta.HasChatTemplate {
-			result.Flags = append(result.Flags, "--jinja")
-		}
-
-		// --threads based on CPU cores
-		threads := inv.CPU.Cores
-		if threads == 0 {
-			threads = inv.CPU.Threads
-		}
-		if threads == 0 {
-			threads = 4
-		}
-		result.CPUThreads = threads
-		result.Flags = append(result.Flags,
-			"--threads", fmt.Sprintf("%d", threads),
-		)
+	} else if !result.CPUFallback {
+		applyCPUFallback(result, meta, inv)
 	}
 
 	// Build the full command line
 	result.Command = buildCommand(llamaServerPath, result.Flags)
 
 	return result, nil
+}
+
+func normalizeBackend(backend ...runtimemgr.BuildBackend) runtimemgr.BuildBackend {
+	if len(backend) == 0 {
+		return runtimemgr.BuildBackendCUDA
+	}
+	switch backend[0] {
+	case runtimemgr.BuildBackendCUDA, runtimemgr.BuildBackendVulkan, runtimemgr.BuildBackendCPU:
+		return backend[0]
+	default:
+		return runtimemgr.BuildBackendCUDA
+	}
+}
+
+func applyCPUFallback(result *Result, meta *model.GGUFMetadata, inv *hardware.Inventory) {
+	result.CPUFallback = true
+	result.SelectedDevice = "cpu"
+	result.GPUIndex = -1
+	result.Flags = append(result.Flags,
+		"--n-gpu-layers", "0",
+		"--no-warmup",
+	)
+	result.VRAMTotalMB = 0
+
+	// Context size: still cap against available system RAM
+	ctxSize := int(meta.ContextLength)
+	if ctxSize > 0 {
+		capped := capContextByVRAM(ctxSize, meta, inv.CPU.RAMFreeMB)
+		if capped < ctxSize {
+			result.Flags = append(result.Flags,
+				"--ctx-size", fmt.Sprintf("%d", capped),
+			)
+		}
+	}
+
+	// --jinja if the model has a chat template
+	if meta.HasChatTemplate {
+		result.Flags = append(result.Flags, "--jinja")
+	}
+
+	// --threads based on CPU cores
+	threads := inv.CPU.Cores
+	if threads == 0 {
+		threads = inv.CPU.Threads
+	}
+	if threads == 0 {
+		threads = 4
+	}
+	result.CPUThreads = threads
+	result.Flags = append(result.Flags,
+		"--threads", fmt.Sprintf("%d", threads),
+	)
 }
 
 // selectBestGPU picks the GPU with enough free VRAM, preferring the one with
@@ -182,6 +223,107 @@ func selectBestGPU(gpus []hardware.GPU, requiredVRAM uint64) (*hardware.GPU, int
 		return nil, -1, 0
 	}
 	return best, bestIdx, best.VRAMFree
+}
+
+func selectBestVulkanGPU(gpus []hardware.VulkanGPU, requiredVRAM uint64) (*hardware.VulkanGPU, int, uint64) {
+	candidates := usableVulkanGPUs(gpus)
+	if len(candidates) == 0 {
+		return nil, -1, 0
+	}
+
+	var best *hardware.VulkanGPU
+	bestIdx := -1
+	bestHeadroom := uint64(0)
+
+	for i, g := range candidates {
+		free := g.FreeVRAM
+		if free < requiredVRAM {
+			continue
+		}
+		headroom := free - requiredVRAM
+		if best == nil || headroom > bestHeadroom {
+			best = &g
+			bestIdx = i
+			bestHeadroom = headroom
+		}
+	}
+
+	if best == nil {
+		return nil, -1, 0
+	}
+	return best, bestIdx, best.FreeVRAM
+}
+
+func usableVulkanGPUs(gpus []hardware.VulkanGPU) []hardware.VulkanGPU {
+	usable := make([]hardware.VulkanGPU, 0, len(gpus))
+	for _, g := range gpus {
+		if vulkanGPUIsSoftware(g) {
+			continue
+		}
+		usable = append(usable, g)
+	}
+	if len(usable) == 0 {
+		return usable
+	}
+
+	hasAMDOrIntelDiscrete := false
+	for _, g := range usable {
+		if !vulkanGPUIsDiscrete(g) {
+			continue
+		}
+		switch vulkanGPUVendor(g) {
+		case "amd", "intel":
+			hasAMDOrIntelDiscrete = true
+			break
+		}
+	}
+	if !hasAMDOrIntelDiscrete {
+		return usable
+	}
+
+	filtered := make([]hardware.VulkanGPU, 0, len(usable))
+	for _, g := range usable {
+		if vulkanGPUVendor(g) == "nvidia" {
+			continue
+		}
+		filtered = append(filtered, g)
+	}
+	return filtered
+}
+
+func vulkanGPUIsSoftware(g hardware.VulkanGPU) bool {
+	name := strings.ToLower(g.Name)
+	deviceType := strings.ToUpper(g.DeviceType())
+	return strings.Contains(name, "llvmpipe") ||
+		strings.Contains(name, "lavapipe") ||
+		strings.Contains(name, "software") ||
+		strings.Contains(deviceType, "CPU")
+}
+
+func vulkanGPUIsDiscrete(g hardware.VulkanGPU) bool {
+	return strings.Contains(strings.ToUpper(g.DeviceType()), "DISCRETE_GPU")
+}
+
+func vulkanGPUVendor(g hardware.VulkanGPU) string {
+	switch strings.ToLower(strings.TrimSpace(g.VendorID())) {
+	case "0x10de":
+		return "nvidia"
+	case "0x1002":
+		return "amd"
+	case "0x8086":
+		return "intel"
+	}
+	name := strings.ToLower(g.Name)
+	switch {
+	case strings.Contains(name, "nvidia"):
+		return "nvidia"
+	case strings.Contains(name, "amd"), strings.Contains(name, "radeon"):
+		return "amd"
+	case strings.Contains(name, "intel"), strings.Contains(name, "arc"):
+		return "intel"
+	default:
+		return ""
+	}
 }
 
 // capContextByVRAM estimates the maximum safe context length given available VRAM.
@@ -237,8 +379,41 @@ func FormatMB(mb uint64) string {
 }
 
 // GPUReasoning returns a human-readable explanation of GPU selection.
-func GPUReasoning(inv *hardware.Inventory, requiredVRAM uint64) string {
+func GPUReasoning(inv *hardware.Inventory, requiredVRAM uint64, backend ...runtimemgr.BuildBackend) string {
 	var lines []string
+	effectiveBackend := normalizeBackend(backend...)
+	if inv == nil {
+		inv = &hardware.Inventory{}
+	}
+	switch effectiveBackend {
+	case runtimemgr.BuildBackendCPU:
+		return "Runtime backend is CPU-only — will use CPU"
+	case runtimemgr.BuildBackendVulkan:
+		candidates := usableVulkanGPUs(inv.VulkanGPUs)
+		if len(candidates) == 0 {
+			return "No Vulkan GPU detected — will use CPU"
+		}
+		lines = append(lines, fmt.Sprintf("Required VRAM: %s (model %s + 20%% KV cache overhead)",
+			FormatMB(requiredVRAM), FormatMB(requiredVRAM-(requiredVRAM*20/100))))
+		bestGPU, _, availableVRAM := selectBestVulkanGPU(inv.VulkanGPUs, requiredVRAM)
+		if bestGPU != nil {
+			lines = append(lines, fmt.Sprintf("Selected: GPU %d (%s) with %s free (%s headroom)",
+				bestGPU.Index,
+				bestGPU.Name,
+				FormatMB(availableVRAM),
+				FormatMB(availableVRAM-requiredVRAM)))
+		} else {
+			for _, g := range candidates {
+				lines = append(lines, fmt.Sprintf("  GPU %d (%s): %s free, insufficient (need %s)",
+					g.Index,
+					g.Name,
+					FormatMB(g.FreeVRAM),
+					FormatMB(requiredVRAM)))
+			}
+			lines = append(lines, "No Vulkan GPU with enough VRAM — will use CPU fallback")
+		}
+		return strings.Join(lines, "\n")
+	}
 	if len(inv.GPUs) == 0 {
 		return "No GPU detected — will use CPU"
 	}

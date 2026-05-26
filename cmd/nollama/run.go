@@ -17,6 +17,7 @@ import (
 	"github.com/sovereignty-labs/nollama/internal/hardware"
 	"github.com/sovereignty-labs/nollama/internal/model"
 	"github.com/sovereignty-labs/nollama/internal/process"
+	runtimemgr "github.com/sovereignty-labs/nollama/internal/runtime"
 	"github.com/spf13/cobra"
 )
 
@@ -79,7 +80,7 @@ func runRunModel(cmd *cobra.Command, args []string) error {
 // and returns the OpenAI-compatible base URL plus a cleanup func that kills
 // the spawned process.
 func startLlamaServerForRun(cmd *cobra.Command, args []string, cfg *config.Config, modelPath, modelName, runtimeName string) (string, func(), error) {
-	llamaServerFlag, err := resolveLlamaServerPathWithRuntime(cmd, cfg, runtimeName)
+	llamaServerFlag, backend, err := resolveLlamaServerPathWithRuntime(cmd, cfg, runtimeName)
 	if err != nil {
 		return "", func() {}, err
 	}
@@ -96,7 +97,7 @@ func startLlamaServerForRun(cmd *cobra.Command, args []string, cfg *config.Confi
 		return "", func() {}, fmt.Errorf("hardware detection failed: %w", err)
 	}
 
-	result, err := process.ComputeFlags(meta, modelPath, inv, llamaServerFlag, 0)
+	result, err := process.ComputeFlags(meta, modelPath, inv, llamaServerFlag, 0, backend)
 	if err != nil {
 		return "", func() {}, fmt.Errorf("flag computation failed: %w", err)
 	}
@@ -109,8 +110,8 @@ func startLlamaServerForRun(cmd *cobra.Command, args []string, cfg *config.Confi
 		// hides the GPUs.
 		result.CPUFallback = true
 		result.SelectedDevice = "cpu"
-	} else if gpu, _ := cmd.Flags().GetInt("gpu"); gpu >= 0 {
-		result.SelectedDevice = fmt.Sprintf("cuda:%d", gpu)
+	} else if gpu, _ := cmd.Flags().GetInt("gpu"); gpu >= 0 && result.Backend != runtimemgr.BuildBackendCPU {
+		result.SelectedDevice = fmt.Sprintf("%s:%d", result.Backend, gpu)
 		result.GPUIndex = gpu
 	}
 	result.Command = buildCommand(llamaServerFlag, result.Flags)

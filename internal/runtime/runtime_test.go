@@ -147,6 +147,56 @@ func TestResolveNamedRuntime(t *testing.T) {
 	}
 }
 
+func TestRuntimeBackendReadsMetadataAndDefaultsToCUDA(t *testing.T) {
+	dir := t.TempDir()
+	mgr := &Manager{runtimesDir: dir}
+
+	runtimeDir := filepath.Join(dir, "llama-vulkan")
+	if err := os.MkdirAll(runtimeDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(runtimeDir, "backend"), []byte("vulkan\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if got := mgr.RuntimeBackend("llama-vulkan"); got != BuildBackendVulkan {
+		t.Fatalf("RuntimeBackend() = %q, want vulkan", got)
+	}
+
+	cpuDir := filepath.Join(dir, "llama-cpu")
+	if err := os.MkdirAll(cpuDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if got := mgr.RuntimeBackend("llama-cpu"); got != BuildBackendCUDA {
+		t.Fatalf("RuntimeBackend() without metadata = %q, want cuda default", got)
+	}
+}
+
+func TestAddWritesBackendMetadata(t *testing.T) {
+	dir := t.TempDir()
+	mgr := &Manager{runtimesDir: dir}
+
+	binaryPath := filepath.Join(dir, "llama-server")
+	if err := os.WriteFile(binaryPath, []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := mgr.Add("custom-runtime", binaryPath, BuildBackendVulkan); err != nil {
+		t.Fatalf("Add() error: %v", err)
+	}
+
+	if got := mgr.RuntimeBackend("custom-runtime"); got != BuildBackendVulkan {
+		t.Fatalf("RuntimeBackend() = %q, want vulkan", got)
+	}
+
+	data, err := os.ReadFile(filepath.Join(dir, "custom-runtime", "backend"))
+	if err != nil {
+		t.Fatalf("read backend metadata: %v", err)
+	}
+	if strings.TrimSpace(string(data)) != "vulkan" {
+		t.Fatalf("backend metadata = %q, want vulkan", strings.TrimSpace(string(data)))
+	}
+}
+
 func TestResolveNoActiveRuntime(t *testing.T) {
 	dir := t.TempDir()
 	mgr := &Manager{runtimesDir: dir}

@@ -9,6 +9,7 @@ import (
 
 	"github.com/sovereignty-labs/nollama/internal/hardware"
 	"github.com/sovereignty-labs/nollama/internal/model"
+	runtimemgr "github.com/sovereignty-labs/nollama/internal/runtime"
 )
 
 func writeTestGGUF(t *testing.T, dir string, name string, fileSizeBytes int64, kvs []modelTestKV) (string, *model.GGUFMetadata) {
@@ -16,8 +17,8 @@ func writeTestGGUF(t *testing.T, dir string, name string, fileSizeBytes int64, k
 	path := filepath.Join(dir, name)
 
 	meta := &model.GGUFMetadata{
-		FileSizeBytes:   fileSizeBytes,
-		KV:              make(map[string]any),
+		FileSizeBytes: fileSizeBytes,
+		KV:            make(map[string]any),
 	}
 
 	for _, kv := range kvs {
@@ -561,6 +562,22 @@ func TestGPUReasoning_Fallback(t *testing.T) {
 	}
 }
 
+func TestGPUReasoning_VulkanBackend(t *testing.T) {
+	inv := &hardware.Inventory{
+		VulkanGPUs: []hardware.VulkanGPU{
+			{Index: 0, Name: "NVIDIA GeForce RTX 2060", TotalVRAM: 6390, FreeVRAM: 6390},
+			{Index: 1, Name: "AMD Radeon Graphics", TotalVRAM: 32768, FreeVRAM: 32768},
+		},
+	}
+	reasoning := GPUReasoning(inv, 4096, runtimemgr.BuildBackendVulkan)
+	if !strings.Contains(reasoning, "AMD Radeon Graphics") {
+		t.Fatalf("expected Vulkan reasoning to select AMD GPU, got %q", reasoning)
+	}
+	if strings.Contains(reasoning, "NVIDIA GeForce RTX 2060") && strings.Contains(reasoning, "Selected:") {
+		t.Fatalf("expected NVIDIA GPU to be skipped when AMD discrete GPU is present, got %q", reasoning)
+	}
+}
+
 func TestComputeFlags_MultiGPU_BestSelected(t *testing.T) {
 	dir := t.TempDir()
 	modelPath, meta := writeTestGGUF(t, dir, "model.gguf", 8*1024*1024*1024, []modelTestKV{
@@ -597,6 +614,70 @@ func TestComputeFlags_MultiGPU_BestSelected(t *testing.T) {
 	// Should pick GPU 1 (RTX 4090) with most headroom
 	if result.SelectedDevice != "cuda:1" {
 		t.Errorf("expected cuda:1, got %q", result.SelectedDevice)
+	}
+}
+
+func TestComputeFlags_VulkanBackendUsesVulkanGPUs(t *testing.T) {
+	dir := t.TempDir()
+	modelPath, meta := writeTestGGUF(t, dir, "model.gguf", 4*1024*1024*1024, []modelTestKV{
+		{"general.architecture", "llama"},
+		{"general.context_length", uint64(4096)},
+		{"general.file_type", uint32(15)},
+	})
+
+	inv := &hardware.Inventory{
+		GPUs: []hardware.GPU{
+			{Index: 0, Name: "NVIDIA GeForce RTX 2060", VRAMTotal: 6390, VRAMFree: 6390, VRAMUsed: 0},
+		},
+		VulkanGPUs: []hardware.VulkanGPU{
+			{Index: 0, Name: "NVIDIA GeForce RTX 2060", TotalVRAM: 6390, FreeVRAM: 6390},
+			{Index: 1, Name: "AMD Radeon Graphics", TotalVRAM: 32768, FreeVRAM: 32768},
+		},
+		CPU: hardware.CPU{Cores: 8, Threads: 16},
+	}
+
+	result, err := ComputeFlags(meta, modelPath, inv, "/usr/local/bin/llama-server", 0, runtimemgr.BuildBackendVulkan)
+	if err != nil {
+		t.Fatalf("ComputeFlags error: %v", err)
+	}
+	if result.Backend != runtimemgr.BuildBackendVulkan {
+		t.Fatalf("Backend = %q, want vulkan", result.Backend)
+	}
+	if result.SelectedDevice != "vulkan:1" {
+		t.Fatalf("SelectedDevice = %q, want vulkan:1", result.SelectedDevice)
+	}
+	if result.CPUFallback {
+		t.Fatal("expected Vulkan GPU mode, got CPU fallback")
+	}
+}
+
+func TestComputeFlags_CPUBackendForcesCPU(t *testing.T) {
+	dir := t.TempDir()
+	modelPath, meta := writeTestGGUF(t, dir, "model.gguf", 4*1024*1024*1024, []modelTestKV{
+		{"general.architecture", "llama"},
+		{"general.context_length", uint64(4096)},
+		{"general.file_type", uint32(15)},
+	})
+
+	inv := &hardware.Inventory{
+		GPUs: []hardware.GPU{
+			{Index: 0, Name: "NVIDIA GeForce RTX 4090", VRAMTotal: 24576, VRAMFree: 20000},
+		},
+		VulkanGPUs: []hardware.VulkanGPU{
+			{Index: 0, Name: "AMD Radeon Graphics", TotalVRAM: 32768, FreeVRAM: 32768},
+		},
+		CPU: hardware.CPU{Cores: 8, Threads: 16},
+	}
+
+	result, err := ComputeFlags(meta, modelPath, inv, "/usr/local/bin/llama-server", 0, runtimemgr.BuildBackendCPU)
+	if err != nil {
+		t.Fatalf("ComputeFlags error: %v", err)
+	}
+	if !result.CPUFallback {
+		t.Fatal("expected CPU-only backend to force CPU fallback")
+	}
+	if result.SelectedDevice != "cpu" {
+		t.Fatalf("SelectedDevice = %q, want cpu", result.SelectedDevice)
 	}
 }
 

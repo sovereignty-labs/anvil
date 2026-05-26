@@ -8,6 +8,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	runtimemgr "github.com/sovereignty-labs/nollama/internal/runtime"
 )
 
 // makeTestResult creates a minimal Result for testing Start/Stop.
@@ -20,6 +22,7 @@ func makeTestResult(t *testing.T, port int, llamaServerPath string, flags ...str
 	}, flags...)
 	return &Result{
 		SelectedDevice: "cuda:0",
+		Backend:        runtimemgr.BuildBackendCUDA,
 		Flags:          allFlags,
 		Command:        llamaServerPath + " " + fmt.Sprintf("--model /tmp/test/model.gguf --host 0.0.0.0 --port %d", port),
 		VRAMUsedMB:     4096,
@@ -1160,16 +1163,22 @@ func TestStartOptsStart_CPU_Device_Flags(t *testing.T) {
 		t.Errorf("expected --n-gpu-layers 0 in flags, got: %v", proc.Flags)
 	}
 
-	// Verify CUDA_VISIBLE_DEVICES is empty (GPU hidden in CPU mode)
+	// Verify both GPU selectors are empty (GPU hidden in CPU mode)
 	var cudaVisibleDevices string
+	var vkDevice string
 	for _, env := range proc.cmd.Env {
 		if strings.HasPrefix(env, "CUDA_VISIBLE_DEVICES=") {
 			cudaVisibleDevices = env
-			break
+		}
+		if strings.HasPrefix(env, "GGML_VK_DEVICE=") {
+			vkDevice = env
 		}
 	}
 	if cudaVisibleDevices != "CUDA_VISIBLE_DEVICES=" {
 		t.Errorf("expected CUDA_VISIBLE_DEVICES=\"\" in environment, got: %s", cudaVisibleDevices)
+	}
+	if vkDevice != "GGML_VK_DEVICE=" {
+		t.Errorf("expected GGML_VK_DEVICE=\"\" in environment, got: %s", vkDevice)
 	}
 
 	// Verify GPUIndex is "cpu"
@@ -1183,7 +1192,7 @@ func TestStartOptsStart_CPU_Device_Flags(t *testing.T) {
 func TestBuildChildEnvGPUIsolation(t *testing.T) {
 	t.Setenv("CUDA_VISIBLE_DEVICES", "stale")
 
-	env := buildChildEnv(1, false, "/opt/nollama/runtimes/r1/llama-server", nil)
+	env := buildChildEnv(runtimemgr.BuildBackendCUDA, 1, false, "/opt/nollama/runtimes/r1/llama-server", nil)
 	want := "CUDA_VISIBLE_DEVICES=1"
 	found := false
 	stale := false
@@ -1204,24 +1213,53 @@ func TestBuildChildEnvGPUIsolation(t *testing.T) {
 }
 
 func TestBuildChildEnvCPUFallback(t *testing.T) {
-	env := buildChildEnv(-1, true, "", nil)
-	want := "CUDA_VISIBLE_DEVICES="
+	env := buildChildEnv(runtimemgr.BuildBackendCUDA, -1, true, "", nil)
+	wantCUDA := "CUDA_VISIBLE_DEVICES="
+	wantVK := "GGML_VK_DEVICE="
+	foundCUDA := false
+	foundVK := false
 	for _, e := range env {
-		if e == want {
-			return
+		if e == wantCUDA {
+			foundCUDA = true
+		}
+		if e == wantVK {
+			foundVK = true
 		}
 	}
-	t.Errorf("expected env to contain empty CUDA_VISIBLE_DEVICES, got %v", envContainingCUDA(env))
+	if !foundCUDA || !foundVK {
+		t.Errorf("expected empty GPU selectors, got %v", env)
+	}
 }
 
 func TestBuildChildEnvNoGPUIndexLeavesUnset(t *testing.T) {
 	// No GPU and not forced CPU: don't override CUDA_VISIBLE_DEVICES at all.
 	t.Setenv("CUDA_VISIBLE_DEVICES", "")
-	env := buildChildEnv(-1, false, "", nil)
+	env := buildChildEnv(runtimemgr.BuildBackendCUDA, -1, false, "", nil)
 	for _, e := range env {
 		if strings.HasPrefix(e, "CUDA_VISIBLE_DEVICES=") {
 			t.Errorf("expected no CUDA_VISIBLE_DEVICES entry, got %s", e)
 		}
+		if strings.HasPrefix(e, "GGML_VK_DEVICE=") {
+			t.Errorf("expected no GGML_VK_DEVICE entry, got %s", e)
+		}
+	}
+}
+
+func TestBuildChildEnvVulkanUsesGGMLVKDevice(t *testing.T) {
+	t.Setenv("GGML_VK_DEVICE", "stale")
+	env := buildChildEnv(runtimemgr.BuildBackendVulkan, 2, false, "/opt/runtimes/llama-vulkan/llama-server", nil)
+	want := "GGML_VK_DEVICE=2"
+	found := false
+	for _, e := range env {
+		if e == want {
+			found = true
+		}
+		if strings.HasPrefix(e, "CUDA_VISIBLE_DEVICES=") {
+			t.Fatalf("unexpected CUDA selector in Vulkan env: %v", envContainingCUDA(env))
+		}
+	}
+	if !found {
+		t.Fatalf("expected env to contain %q, got %v", want, env)
 	}
 }
 
@@ -1253,7 +1291,7 @@ func envContainingCUDA(env []string) []string {
 
 func TestBuildChildEnvSetsLDLibraryPath(t *testing.T) {
 	t.Setenv("LD_LIBRARY_PATH", "")
-	env := buildChildEnv(0, false, "/opt/runtimes/llama-b9275/llama-server", nil)
+	env := buildChildEnv(runtimemgr.BuildBackendCUDA, 0, false, "/opt/runtimes/llama-b9275/llama-server", nil)
 	wantPrefix := "LD_LIBRARY_PATH=/opt/runtimes/llama-b9275"
 	for _, e := range env {
 		if e == wantPrefix {
@@ -1265,7 +1303,7 @@ func TestBuildChildEnvSetsLDLibraryPath(t *testing.T) {
 
 func TestBuildChildEnvPrependsToExistingLDP(t *testing.T) {
 	t.Setenv("LD_LIBRARY_PATH", "/usr/local/lib:/opt/foo/lib")
-	env := buildChildEnv(0, false, "/opt/runtimes/llama-b9275/llama-server", nil)
+	env := buildChildEnv(runtimemgr.BuildBackendCUDA, 0, false, "/opt/runtimes/llama-b9275/llama-server", nil)
 	want := "LD_LIBRARY_PATH=/opt/runtimes/llama-b9275:/usr/local/lib:/opt/foo/lib"
 	for _, e := range env {
 		if e == want {
@@ -1277,7 +1315,7 @@ func TestBuildChildEnvPrependsToExistingLDP(t *testing.T) {
 
 func TestBuildChildEnvEmptyBinaryPreservesExistingLDP(t *testing.T) {
 	t.Setenv("LD_LIBRARY_PATH", "/keep/this")
-	env := buildChildEnv(0, false, "", nil)
+	env := buildChildEnv(runtimemgr.BuildBackendCUDA, 0, false, "", nil)
 	want := "LD_LIBRARY_PATH=/keep/this"
 	for _, e := range env {
 		if e == want {
@@ -1288,7 +1326,7 @@ func TestBuildChildEnvEmptyBinaryPreservesExistingLDP(t *testing.T) {
 }
 
 func TestBuildChildEnvAddsExtraEnv(t *testing.T) {
-	env := buildChildEnv(0, false, "/opt/runtimes/llama-b9275/llama-server", map[string]string{
+	env := buildChildEnv(runtimemgr.BuildBackendCUDA, 0, false, "/opt/runtimes/llama-b9275/llama-server", map[string]string{
 		"GGML_VK_DEVICE": "1",
 	})
 	want := "GGML_VK_DEVICE=1"
