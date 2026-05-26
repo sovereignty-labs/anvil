@@ -14,6 +14,8 @@ jobs:
     steps:
       - name: Install tools
         run: apk add --no-cache docker-cli curl jq
+      - name: Trust CA
+        run: update-ca-certificates
       - name: Registry login
         run: echo $REGISTRY_PASSWORD | docker login git.hirdforge.com -u $REGISTRY_USER --password-stdin
       - name: Clone repository
