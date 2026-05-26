@@ -357,6 +357,13 @@ func runLoad(cmd *cobra.Command, args []string) error {
 				g.Index, g.DisplayName(), g.VRAMTotalGB(), g.VRAMFreeGB())
 		}
 	}
+	fmt.Printf("  Vulkan GPUs: %d detected\n", len(inv.VulkanGPUs))
+	if len(inv.VulkanGPUs) > 0 {
+		for _, g := range inv.VulkanGPUs {
+			fmt.Printf("    GPU %d: %s — %.1f GB total, %.1f GB free\n",
+				g.Index, g.Name, float64(g.TotalVRAM)/1024.0, float64(g.FreeVRAM)/1024.0)
+		}
+	}
 	fmt.Printf("  CPU:   %s — %d cores, %d threads\n",
 		inv.CPU.ModelName, inv.CPU.Cores, inv.CPU.Threads)
 

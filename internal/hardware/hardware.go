@@ -6,7 +6,9 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 )
@@ -97,6 +99,17 @@ func DetectGPUs() ([]GPU, error) {
 }
 
 var vulkanGPUHeader = regexp.MustCompile(`^GPU([0-9]+):$`)
+var drmCardHeader = regexp.MustCompile(`^card([0-9]+)$`)
+
+const sysfsDRMRoot = "/sys/class/drm"
+
+type sysfsGPUInfo struct {
+	VendorID  string // e.g. "0x1002"
+	TotalVRAM uint64 // MiB
+	UsedVRAM  uint64 // MiB
+	FreeVRAM  uint64 // MiB
+	CardPath  string // e.g. "/sys/class/drm/card2"
+}
 
 // DetectVulkanGPUs enumerates Vulkan GPUs via vulkaninfo --summary.
 // Returns nil (not error) if vulkaninfo is not found.
@@ -110,7 +123,9 @@ func DetectVulkanGPUs() ([]VulkanGPU, error) {
 	if err != nil {
 		return nil, fmt.Errorf("vulkaninfo failed: %w", err)
 	}
-	return parseVulkanInfoSummary(string(out)), nil
+	gpus := parseVulkanInfoSummary(string(out))
+	backfillVulkanVRAMFromSysfs(gpus, scanSysfsAMDVRAM())
+	return gpus, nil
 }
 
 func parseVulkanInfoSummary(out string) []VulkanGPU {
@@ -170,6 +185,116 @@ func parseVulkanInfoSummary(out string) []VulkanGPU {
 	}
 	flush()
 	return gpus
+}
+
+func scanSysfsAMDVRAM() []sysfsGPUInfo {
+	return scanSysfsAMDVRAMAt(sysfsDRMRoot)
+}
+
+func scanSysfsAMDVRAMAt(drmRoot string) []sysfsGPUInfo {
+	matches, err := filepath.Glob(filepath.Join(drmRoot, "card*", "device", "mem_info_vram_total"))
+	if err != nil || len(matches) == 0 {
+		return nil
+	}
+
+	sort.Slice(matches, func(i, j int) bool {
+		return sysfsCardIndex(matches[i]) < sysfsCardIndex(matches[j])
+	})
+
+	out := make([]sysfsGPUInfo, 0, len(matches))
+	for _, totalPath := range matches {
+		cardPath := filepath.Dir(filepath.Dir(totalPath))
+		devicePath := filepath.Dir(totalPath)
+		vendorPath := filepath.Join(devicePath, "vendor")
+		vendor, err := readTrimmedFile(vendorPath)
+		if err != nil || strings.TrimSpace(vendor) != "0x1002" {
+			continue
+		}
+
+		totalBytes, err := readUintFile(totalPath)
+		if err != nil {
+			continue
+		}
+		usedBytes, err := readUintFile(filepath.Join(devicePath, "mem_info_vram_used"))
+		if err != nil {
+			continue
+		}
+
+		totalMiB := bytesToMiB(totalBytes)
+		usedMiB := bytesToMiB(usedBytes)
+		freeMiB := uint64(0)
+		if totalMiB > usedMiB {
+			freeMiB = totalMiB - usedMiB
+		}
+
+		out = append(out, sysfsGPUInfo{
+			VendorID:  strings.TrimSpace(vendor),
+			TotalVRAM: totalMiB,
+			UsedVRAM:  usedMiB,
+			FreeVRAM:  freeMiB,
+			CardPath:  cardPath,
+		})
+	}
+	return out
+}
+
+func backfillVulkanVRAMFromSysfs(gpus []VulkanGPU, sysfs []sysfsGPUInfo) {
+	if len(gpus) == 0 || len(sysfs) == 0 {
+		return
+	}
+
+	needs := make([]int, 0, len(gpus))
+	for i, gpu := range gpus {
+		if gpu.TotalVRAM == 0 && strings.EqualFold(gpu.VendorID(), "0x1002") {
+			needs = append(needs, i)
+		}
+	}
+	if len(needs) == 0 {
+		return
+	}
+
+	for i, gpuIdx := range needs {
+		if i >= len(sysfs) {
+			break
+		}
+		info := sysfs[i]
+		gpus[gpuIdx].TotalVRAM = info.TotalVRAM
+		gpus[gpuIdx].FreeVRAM = info.FreeVRAM
+	}
+}
+
+func sysfsCardIndex(path string) int {
+	base := filepath.Base(filepath.Dir(filepath.Dir(path)))
+	match := drmCardHeader.FindStringSubmatch(base)
+	if len(match) != 2 {
+		return 1<<31 - 1
+	}
+	idx, err := strconv.Atoi(match[1])
+	if err != nil {
+		return 1<<31 - 1
+	}
+	return idx
+}
+
+func readTrimmedFile(path string) (string, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(string(data)), nil
+}
+
+func readUintFile(path string) (uint64, error) {
+	data, err := readTrimmedFile(path)
+	if err != nil {
+		return 0, err
+	}
+	return strconv.ParseUint(data, 10, 64)
+}
+
+func bytesToMiB(bytes uint64) uint64 {
+	const mib = 1024 * 1024
+	return bytes / mib
 }
 
 // DetectCPU reads CPU and memory info from /proc.
