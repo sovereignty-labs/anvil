@@ -105,10 +105,12 @@ func ComputeFlags(meta *model.GGUFMetadata, modelPath string, inv *hardware.Inve
 
 	if !result.CPUFallback && (bestCUDA != nil || bestVulkan != nil) {
 		result.Flags = append(result.Flags,
-			"--n-gpu-layers", "99",
 			"--flash-attn", "on",
 			"--no-warmup",
 		)
+		if bestCUDA != nil {
+			result.Flags = append(result.Flags, "--n-gpu-layers", "99")
+		}
 		result.VRAMTotalMB = availableVRAM
 		if bestCUDA != nil {
 			result.SelectedDevice = fmt.Sprintf("%s:%d", effectiveBackend, bestCUDA.Index)
