@@ -41,6 +41,7 @@ Examples:
 func init() {
 	runModelCmd.Flags().Int("gpu", -1, "GPU index (-1 for auto)")
 	runModelCmd.Flags().Bool("cpu", false, "Force CPU inference")
+	runModelCmd.Flags().Bool("no-think", false, "Disable model thinking via chat-template kwargs")
 	runModelCmd.Flags().String("runtime", "", "Use a specific llama-server runtime")
 	runModelCmd.Flags().Int("port", 0, "Pin llama-server to this port instead of auto-assigning")
 	runModelCmd.Flags().StringArray("passthrough", nil, "Extra llama-server flags (repeatable)")
@@ -116,7 +117,7 @@ func startLlamaServerForRun(cmd *cobra.Command, args []string, cfg *config.Confi
 	}
 	result.Command = buildCommand(llamaServerFlag, result.Flags)
 
-	passthrough := collectPassthrough(cmd, args)
+	passthrough := collectRunPassthrough(cmd, args)
 
 	manager := process.GetManager()
 	for _, proc := range manager.List() {
@@ -148,6 +149,17 @@ func startLlamaServerForRun(cmd *cobra.Command, args []string, cfg *config.Confi
 		_, _ = manager.StopByPort(procInfo.Port)
 	}
 	return endpoint, cleanup, nil
+}
+
+// collectRunPassthrough combines user passthrough flags with run-specific
+// overrides such as --no-think.
+func collectRunPassthrough(cmd *cobra.Command, args []string) []string {
+	passthrough := collectPassthrough(cmd, args)
+	noThink, _ := cmd.Flags().GetBool("no-think")
+	if noThink {
+		passthrough = append(passthrough, "--chat-template-kwargs", `{"enable_thinking": false}`)
+	}
+	return passthrough
 }
 
 // runChatAgainst opens the interactive chat loop against endpoint and wires

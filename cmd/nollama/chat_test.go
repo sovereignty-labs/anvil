@@ -24,7 +24,7 @@ func TestParseSSEStreamAssemblesContent(t *testing.T) {
 	}, "\n")
 
 	var tokens []string
-	got, err := parseSSEStream(strings.NewReader(body), func(c, _ string) {
+	got, stats, err := parseSSEStream(strings.NewReader(body), func(c, _ string) {
 		if c != "" {
 			tokens = append(tokens, c)
 		}
@@ -38,6 +38,9 @@ func TestParseSSEStreamAssemblesContent(t *testing.T) {
 	if strings.Join(tokens, "|") != "Hello| world" {
 		t.Errorf("tokens = %v", tokens)
 	}
+	if stats != (streamStats{}) {
+		t.Errorf("stats = %+v, want zero value", stats)
+	}
 }
 
 func TestParseSSEStreamHandlesReasoning(t *testing.T) {
@@ -49,7 +52,7 @@ func TestParseSSEStreamHandlesReasoning(t *testing.T) {
 
 	var reasoned []string
 	var content []string
-	_, err := parseSSEStream(strings.NewReader(body), func(c, r string) {
+	_, _, err := parseSSEStream(strings.NewReader(body), func(c, r string) {
 		if r != "" {
 			reasoned = append(reasoned, r)
 		}
@@ -75,7 +78,7 @@ func TestParseSSEStreamSkipsMalformedChunks(t *testing.T) {
 		`data: [DONE]`,
 	}, "\n")
 
-	got, err := parseSSEStream(strings.NewReader(body), nil)
+	got, _, err := parseSSEStream(strings.NewReader(body), nil)
 	if err != nil {
 		t.Fatalf("parseSSEStream: %v", err)
 	}
@@ -103,12 +106,15 @@ func TestStreamChatEndToEnd(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	got, err := streamChat(context.Background(), srv.URL, "m", []chatMessage{{Role: "user", Content: "yo"}}, nil)
+	got, stats, err := streamChat(context.Background(), srv.URL, "m", []chatMessage{{Role: "user", Content: "yo"}}, nil)
 	if err != nil {
 		t.Fatalf("streamChat: %v", err)
 	}
 	if got != "hi there" {
 		t.Errorf("got %q, want %q", got, "hi there")
+	}
+	if stats != (streamStats{}) {
+		t.Errorf("stats = %+v, want zero value", stats)
 	}
 }
 
@@ -118,12 +124,49 @@ func TestStreamChatPropagatesHTTPError(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	_, err := streamChat(context.Background(), srv.URL, "m", nil, nil)
+	_, _, err := streamChat(context.Background(), srv.URL, "m", nil, nil)
 	if err == nil {
 		t.Fatal("expected error from 400 response")
 	}
 	if !strings.Contains(err.Error(), "model not loaded") {
 		t.Errorf("expected upstream error to surface, got %v", err)
+	}
+}
+
+func TestParseSSEStreamCapturesUsageAndTimings(t *testing.T) {
+	body := strings.Join([]string{
+		`data: {"choices":[{"delta":{"content":"hello"}}]}`,
+		``,
+		`data: {"choices":[{"finish_reason":"stop","index":0,"delta":{}}],"usage":{"prompt_tokens":12,"completion_tokens":247,"total_tokens":259},"timings":{"prompt_n":12,"predicted_n":247,"predicted_ms":5849.5,"predicted_per_second":42.3}}`,
+		``,
+		`data: [DONE]`,
+		``,
+	}, "\n")
+
+	got, stats, err := parseSSEStream(strings.NewReader(body), nil)
+	if err != nil {
+		t.Fatalf("parseSSEStream: %v", err)
+	}
+	if got != "hello" {
+		t.Fatalf("assembled = %q, want hello", got)
+	}
+	if stats.PromptTokens != 12 || stats.CompletionTokens != 247 {
+		t.Fatalf("stats tokens = %+v, want 12 prompt and 247 completion", stats)
+	}
+	if stats.TokensPerSecond != 42.3 {
+		t.Fatalf("stats tok/s = %.2f, want 42.3", stats.TokensPerSecond)
+	}
+	if summary := formatTokenSummary(stats); summary != "[12 prompt + 247 generated tokens, 42.3 tok/s]" {
+		t.Fatalf("summary = %q", summary)
+	}
+}
+
+func TestWriteDimmedLineUsesANSIWhenSupported(t *testing.T) {
+	var buf bytes.Buffer
+	writeDimmedLine(&buf, true, "[1 prompt + 2 generated tokens, 3.4 tok/s]")
+	want := ansiDim + "[1 prompt + 2 generated tokens, 3.4 tok/s]" + ansiReset + "\n"
+	if buf.String() != want {
+		t.Fatalf("got %q, want %q", buf.String(), want)
 	}
 }
 
@@ -195,6 +238,7 @@ func TestChatLoopReceivesReplyFromFakeServer(t *testing.T) {
 		flusher := w.(http.Flusher)
 		for _, chunk := range []string{
 			`{"choices":[{"delta":{"content":"pong"}}]}`,
+			`{"choices":[{"finish_reason":"stop","index":0,"delta":{}}],"usage":{"prompt_tokens":4,"completion_tokens":1,"total_tokens":5},"timings":{"prompt_n":4,"predicted_n":1,"predicted_ms":25,"predicted_per_second":40}}`,
 			`[DONE]`,
 		} {
 			fmt.Fprintf(w, "data: %s\n\n", chunk)
@@ -213,6 +257,9 @@ func TestChatLoopReceivesReplyFromFakeServer(t *testing.T) {
 	}
 	if !strings.Contains(out.String(), "pong") {
 		t.Errorf("expected pong in output, got %q", out.String())
+	}
+	if !strings.Contains(out.String(), "[4 prompt + 1 generated tokens, 40.0 tok/s]") {
+		t.Errorf("expected token summary in output, got %q", out.String())
 	}
 }
 
@@ -244,7 +291,7 @@ func TestIsConnectionError(t *testing.T) {
 		`write tcp 127.0.0.1: broken pipe`:                      true,
 		`unexpected EOF`:                                        true,
 		`HTTP 500: model not loaded`:                            false,
-		``: false,
+		``:                                                      false,
 	}
 	for in, want := range cases {
 		err := error(nil)
