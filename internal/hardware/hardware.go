@@ -116,24 +116,44 @@ func detectROCmGPUs() ([]GPU, error) {
 	return parseROCmSMICSV(string(out)), nil
 }
 
-type rocmGPUState struct {
-	Index     int
-	Name      string
-	VRAMTotal uint64 // MiB
-	VRAMUsed  uint64 // MiB
-	hasName   bool
-	hasTotal  bool
-	hasUsed   bool
-}
-
 func parseROCmSMICSV(out string) []GPU {
-	records := make(map[int]*rocmGPUState)
-	order := make([]int, 0)
-
 	reader := csv.NewReader(strings.NewReader(out))
 	reader.FieldsPerRecord = -1
 	reader.TrimLeadingSpace = true
 
+	header, err := reader.Read()
+	if err != nil {
+		return nil
+	}
+
+	deviceIdx := -1
+	totalIdx := -1
+	usedIdx := -1
+	nameIdx := -1
+	for i, col := range header {
+		switch normalizeROCmCSVHeader(col) {
+		case "device":
+			deviceIdx = i
+		case "vram total memory (b)":
+			totalIdx = i
+		case "vram total used memory (b)":
+			usedIdx = i
+		case "card series":
+			nameIdx = i
+		}
+	}
+	if deviceIdx < 0 || totalIdx < 0 || usedIdx < 0 || nameIdx < 0 {
+		return nil
+	}
+
+	type rocmGPURow struct {
+		index    int
+		name     string
+		totalMiB uint64
+		usedMiB  uint64
+	}
+
+	rows := make([]rocmGPURow, 0)
 	for {
 		rec, err := reader.Read()
 		if err == io.EOF {
@@ -142,139 +162,65 @@ func parseROCmSMICSV(out string) []GPU {
 		if err != nil || len(rec) == 0 {
 			continue
 		}
-
-		fields := make([]string, 0, len(rec))
-		for _, field := range rec {
-			field = strings.TrimSpace(strings.Trim(field, `"`))
-			if field != "" {
-				fields = append(fields, field)
-			}
-		}
-		if len(fields) == 0 {
+		if deviceIdx >= len(rec) || totalIdx >= len(rec) || usedIdx >= len(rec) || nameIdx >= len(rec) {
 			continue
 		}
 
-		idx, ok := parseROCmGPUIndex(fields[0])
+		idx, ok := parseROCmDeviceIndex(rec[deviceIdx])
+		if !ok {
+			continue
+		}
+		totalBytes, ok := parseROCmUint(rec[totalIdx])
+		if !ok {
+			continue
+		}
+		usedBytes, ok := parseROCmUint(rec[usedIdx])
 		if !ok {
 			continue
 		}
 
-		state := records[idx]
-		if state == nil {
-			state = &rocmGPUState{Index: idx}
-			records[idx] = state
-			order = append(order, idx)
-		}
-
-		if len(fields) >= 4 && !rocmLooksLikeMetric(fields[1]) {
-			state.Name = fields[1]
-			state.hasName = state.Name != ""
-			if total, ok := parseROCmUint(fields[2]); ok {
-				state.VRAMTotal = bytesToMiB(total)
-				state.hasTotal = true
-			}
-			if used, ok := parseROCmUint(fields[3]); ok {
-				state.VRAMUsed = bytesToMiB(used)
-				state.hasUsed = true
-			}
-			continue
-		}
-
-		if len(fields) < 3 {
-			continue
-		}
-
-		metric := rocmNormalizeMetric(fields[1])
-		value := fields[2]
-		switch {
-		case rocmMetricIsName(metric):
-			state.Name = value
-			state.hasName = state.Name != ""
-		case rocmMetricIsTotal(metric):
-			if total, ok := parseROCmUint(value); ok {
-				state.VRAMTotal = bytesToMiB(total)
-				state.hasTotal = true
-			}
-		case rocmMetricIsUsed(metric):
-			if used, ok := parseROCmUint(value); ok {
-				state.VRAMUsed = bytesToMiB(used)
-				state.hasUsed = true
-			}
-		}
+		rows = append(rows, rocmGPURow{
+			index:    idx,
+			name:     strings.TrimSpace(rec[nameIdx]),
+			totalMiB: bytesToMiB(totalBytes),
+			usedMiB:  bytesToMiB(usedBytes),
+		})
 	}
 
-	sort.Ints(order)
-	gpus := make([]GPU, 0, len(order))
-	for _, idx := range order {
-		state := records[idx]
-		if state == nil {
-			continue
-		}
-		if !state.hasName && !state.hasTotal && !state.hasUsed {
-			continue
-		}
+	sort.Slice(rows, func(i, j int) bool { return rows[i].index < rows[j].index })
+	gpus := make([]GPU, 0, len(rows))
+	for _, row := range rows {
 		free := uint64(0)
-		if state.VRAMTotal > state.VRAMUsed {
-			free = state.VRAMTotal - state.VRAMUsed
+		if row.totalMiB > row.usedMiB {
+			free = row.totalMiB - row.usedMiB
 		}
 		gpus = append(gpus, GPU{
-			Index:     state.Index,
-			Name:      state.Name,
-			VRAMTotal: state.VRAMTotal,
+			Index:     row.index,
+			Name:      row.name,
+			VRAMTotal: row.totalMiB,
 			VRAMFree:  free,
-			VRAMUsed:  state.VRAMUsed,
+			VRAMUsed:  row.usedMiB,
 		})
 	}
 	return gpus
 }
 
-func parseROCmGPUIndex(field string) (int, bool) {
-	field = strings.TrimSpace(field)
+func normalizeROCmCSVHeader(field string) string {
+	field = strings.ToLower(strings.TrimSpace(strings.Trim(field, `"`)))
+	field = strings.Join(strings.Fields(field), " ")
+	return field
+}
+
+func parseROCmDeviceIndex(field string) (int, bool) {
+	field = normalizeROCmCSVHeader(field)
 	if field == "" {
 		return 0, false
 	}
-	if match := regexp.MustCompile(`(?i)^gpu\[(\d+)\]$`).FindStringSubmatch(field); len(match) == 2 {
-		idx, err := strconv.Atoi(match[1])
-		return idx, err == nil
-	}
+	field = strings.TrimPrefix(field, "card")
 	if idx, err := strconv.Atoi(field); err == nil {
 		return idx, true
 	}
 	return 0, false
-}
-
-func rocmNormalizeMetric(field string) string {
-	field = strings.ToLower(strings.TrimSpace(field))
-	field = strings.ReplaceAll(field, "_", " ")
-	field = strings.ReplaceAll(field, "-", " ")
-	field = strings.ReplaceAll(field, "(", "")
-	field = strings.ReplaceAll(field, ")", "")
-	field = strings.ReplaceAll(field, "  ", " ")
-	return strings.TrimSpace(field)
-}
-
-func rocmLooksLikeMetric(field string) bool {
-	metric := rocmNormalizeMetric(field)
-	return rocmMetricIsName(metric) || rocmMetricIsTotal(metric) || rocmMetricIsUsed(metric)
-}
-
-func rocmMetricIsName(metric string) bool {
-	return strings.Contains(metric, "device name") ||
-		strings.Contains(metric, "product name") ||
-		strings.EqualFold(metric, "name")
-}
-
-func rocmMetricIsTotal(metric string) bool {
-	return strings.Contains(metric, "vram total memory") ||
-		strings.Contains(metric, "total memory") ||
-		strings.Contains(metric, "total vram")
-}
-
-func rocmMetricIsUsed(metric string) bool {
-	return strings.Contains(metric, "vram total used memory") ||
-		strings.Contains(metric, "vram used") ||
-		strings.Contains(metric, "used memory") ||
-		strings.Contains(metric, "used vram")
 }
 
 func parseROCmUint(value string) (uint64, bool) {
