@@ -26,15 +26,39 @@ type chatRequest struct {
 	Stream   bool          `json:"stream"`
 }
 
-// streamDelta is the slice of an SSE chunk we care about. Many fields are
-// ignored — we only need the deltas to print them as they arrive.
-type streamDelta struct {
+// streamChunk is the slice of an SSE chunk we care about. Many fields are
+// ignored — we only need the deltas to print them as they arrive, plus the
+// final usage/timing metadata for the token-rate summary line.
+type streamChunk struct {
 	Choices []struct {
 		Delta struct {
 			Content          string `json:"content"`
 			ReasoningContent string `json:"reasoning_content"`
 		} `json:"delta"`
+		FinishReason string `json:"finish_reason"`
 	} `json:"choices"`
+	Usage *struct {
+		PromptTokens     int `json:"prompt_tokens"`
+		CompletionTokens int `json:"completion_tokens"`
+		TotalTokens      int `json:"total_tokens"`
+	} `json:"usage,omitempty"`
+	Timings *struct {
+		PromptN            int     `json:"prompt_n"`
+		PredictedN         int     `json:"predicted_n"`
+		PromptMS           float64 `json:"prompt_ms"`
+		PredictedMS        float64 `json:"predicted_ms"`
+		PromptPerSecond    float64 `json:"prompt_per_second"`
+		PredictedPerSecond float64 `json:"predicted_per_second"`
+	} `json:"timings,omitempty"`
+}
+
+// streamStats captures the final prompt/completion counts and generation
+// speed derived from the final SSE chunk.
+type streamStats struct {
+	PromptTokens     int
+	CompletionTokens int
+	Seconds          float64
+	TokensPerSecond  float64
 }
 
 // streamChat POSTs messages to endpoint/v1/chat/completions with stream=true,
@@ -44,40 +68,41 @@ type streamDelta struct {
 //
 // The ctx is honored mid-stream: cancelling it closes the response body so a
 // long generation can be interrupted (used for Ctrl+C during a reply).
-func streamChat(ctx context.Context, endpoint, modelName string, messages []chatMessage, onToken func(content, reasoning string)) (string, error) {
+func streamChat(ctx context.Context, endpoint, modelName string, messages []chatMessage, onToken func(content, reasoning string)) (string, streamStats, error) {
 	body, err := json.Marshal(chatRequest{
 		Model:    modelName,
 		Messages: messages,
 		Stream:   true,
 	})
 	if err != nil {
-		return "", fmt.Errorf("encode chat request: %w", err)
+		return "", streamStats{}, fmt.Errorf("encode chat request: %w", err)
 	}
 
 	url := strings.TrimRight(endpoint, "/") + "/v1/chat/completions"
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
 	if err != nil {
-		return "", fmt.Errorf("build request: %w", err)
+		return "", streamStats{}, fmt.Errorf("build request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "text/event-stream")
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		return "", fmt.Errorf("post chat: %w", err)
+		return "", streamStats{}, fmt.Errorf("post chat: %w", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode >= 400 {
 		errBody, _ := io.ReadAll(io.LimitReader(resp.Body, 4*1024))
-		return "", fmt.Errorf("chat endpoint returned %s: %s", resp.Status, strings.TrimSpace(string(errBody)))
+		return "", streamStats{}, fmt.Errorf("chat endpoint returned %s: %s", resp.Status, strings.TrimSpace(string(errBody)))
 	}
 
 	return parseSSEStream(resp.Body, onToken)
 }
 
 // parseSSEStream reads an SSE stream from r, invoking onToken with each
-// content / reasoning delta. Returns the full assembled content string.
+// content / reasoning delta. Returns the full assembled content string and
+// the final prompt/completion timing metadata when present.
 //
 // SSE format expected:
 //
@@ -86,13 +111,14 @@ func streamChat(ctx context.Context, endpoint, modelName string, messages []chat
 //	data: [DONE]\n
 //
 // Blank lines between events are tolerated. Non-`data:` lines are ignored.
-func parseSSEStream(r io.Reader, onToken func(content, reasoning string)) (string, error) {
+func parseSSEStream(r io.Reader, onToken func(content, reasoning string)) (string, streamStats, error) {
 	scanner := bufio.NewScanner(r)
 	// SSE chunks can be larger than the default 64 KiB scanner buffer when
 	// reasoning tokens accumulate. Give it room to breathe.
 	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 
 	var assembled strings.Builder
+	var finalStats streamStats
 	for scanner.Scan() {
 		line := scanner.Text()
 		if !strings.HasPrefix(line, "data:") {
@@ -105,7 +131,7 @@ func parseSSEStream(r io.Reader, onToken func(content, reasoning string)) (strin
 		if payload == "[DONE]" {
 			break
 		}
-		var delta streamDelta
+		var delta streamChunk
 		if err := json.Unmarshal([]byte(payload), &delta); err != nil {
 			// Tolerate junk so a single malformed chunk doesn't kill the stream.
 			continue
@@ -122,16 +148,55 @@ func parseSSEStream(r io.Reader, onToken func(content, reasoning string)) (strin
 				onToken(c, rc)
 			}
 		}
+		if stats, ok := streamStatsFromChunk(delta); ok {
+			finalStats = stats
+		}
 	}
 	if err := scanner.Err(); err != nil {
 		// Context cancellation surfaces here as a "context canceled" error;
 		// treat that as a clean stop with whatever we already buffered.
 		if errors.Is(err, context.Canceled) {
-			return assembled.String(), nil
+			return assembled.String(), finalStats, nil
 		}
-		return assembled.String(), err
+		return assembled.String(), finalStats, err
 	}
-	return assembled.String(), nil
+	return assembled.String(), finalStats, nil
+}
+
+func streamStatsFromChunk(chunk streamChunk) (streamStats, bool) {
+	if chunk.Usage == nil && chunk.Timings == nil {
+		return streamStats{}, false
+	}
+
+	stats := streamStats{}
+	if chunk.Usage != nil {
+		stats.PromptTokens = chunk.Usage.PromptTokens
+		stats.CompletionTokens = chunk.Usage.CompletionTokens
+		if stats.PromptTokens == 0 && chunk.Usage.TotalTokens > 0 && stats.CompletionTokens > 0 {
+			stats.PromptTokens = chunk.Usage.TotalTokens - stats.CompletionTokens
+		}
+	}
+	if chunk.Timings != nil {
+		if stats.PromptTokens == 0 && chunk.Timings.PromptN > 0 {
+			stats.PromptTokens = chunk.Timings.PromptN
+		}
+		if stats.CompletionTokens == 0 && chunk.Timings.PredictedN > 0 {
+			stats.CompletionTokens = chunk.Timings.PredictedN
+		}
+		if chunk.Timings.PredictedMS > 0 {
+			stats.Seconds = chunk.Timings.PredictedMS / 1000
+		}
+		if chunk.Timings.PredictedPerSecond > 0 {
+			stats.TokensPerSecond = chunk.Timings.PredictedPerSecond
+		}
+	}
+	if stats.TokensPerSecond <= 0 && stats.Seconds > 0 && stats.CompletionTokens > 0 {
+		stats.TokensPerSecond = float64(stats.CompletionTokens) / stats.Seconds
+	}
+	if stats.Seconds <= 0 && stats.TokensPerSecond > 0 && stats.CompletionTokens > 0 {
+		stats.Seconds = float64(stats.CompletionTokens) / stats.TokensPerSecond
+	}
+	return stats, true
 }
 
 // renderToken writes content / reasoning to w with ANSI dim for reasoning
@@ -184,6 +249,27 @@ func (r *renderState) closeReasoning(w io.Writer) {
 		fmt.Fprintln(w)
 	}
 	r.inReasoning = false
+}
+
+func formatTokenSummary(stats streamStats) string {
+	if stats.CompletionTokens <= 0 || stats.TokensPerSecond <= 0 {
+		return ""
+	}
+	if stats.PromptTokens < 0 {
+		stats.PromptTokens = 0
+	}
+	return fmt.Sprintf("[%d prompt + %d generated tokens, %.1f tok/s]", stats.PromptTokens, stats.CompletionTokens, stats.TokensPerSecond)
+}
+
+func writeDimmedLine(w io.Writer, supportsANSI bool, line string) {
+	if line == "" {
+		return
+	}
+	if supportsANSI {
+		fmt.Fprintf(w, "%s%s%s\n", ansiDim, line, ansiReset)
+		return
+	}
+	fmt.Fprintln(w, line)
 }
 
 // isExitCommand recognizes the many ways users naturally try to leave the
@@ -279,11 +365,12 @@ func chatLoop(endpoint, modelName string, interrupt <-chan struct{}, in io.Reade
 		}()
 
 		state := renderState{supportsANSI: supportsANSI}
-		reply, err := streamChat(ctx, endpoint, modelName, messages, func(content, reasoning string) {
+		reply, stats, err := streamChat(ctx, endpoint, modelName, messages, func(content, reasoning string) {
 			state.write(out, content, reasoning)
 		})
 		state.closeReasoning(out)
 		fmt.Fprintln(out)
+		writeDimmedLine(out, supportsANSI, formatTokenSummary(stats))
 		close(done)
 		cancel()
 
