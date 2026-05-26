@@ -649,6 +649,27 @@ func TestComputeFlags_VulkanBackendUsesVulkanGPUs(t *testing.T) {
 	if result.CPUFallback {
 		t.Fatal("expected Vulkan GPU mode, got CPU fallback")
 	}
+	for i := 0; i < len(result.Flags); i++ {
+		if result.Flags[i] == "--n-gpu-layers" {
+			t.Fatalf("unexpected --n-gpu-layers in Vulkan flags: %v", result.Flags)
+		}
+	}
+	hasFlashAttn := false
+	hasNoWarmup := false
+	for _, f := range result.Flags {
+		if f == "--flash-attn" {
+			hasFlashAttn = true
+		}
+		if f == "--no-warmup" {
+			hasNoWarmup = true
+		}
+	}
+	if !hasFlashAttn {
+		t.Fatal("expected --flash-attn in Vulkan flags")
+	}
+	if !hasNoWarmup {
+		t.Fatal("expected --no-warmup in Vulkan flags")
+	}
 }
 
 func TestComputeFlags_CPUBackendForcesCPU(t *testing.T) {

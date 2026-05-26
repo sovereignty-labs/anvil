@@ -417,7 +417,11 @@ func runLoad(cmd *cobra.Command, args []string) error {
 		} else {
 			fmt.Printf("Device:    %s\n", result.SelectedDevice)
 			fmt.Printf("VRAM:      %s used / %s available\n", process.FormatMB(result.VRAMUsedMB), process.FormatMB(result.VRAMTotalMB))
-			fmt.Printf("GPU Layers: all (99)\n")
+			if backend == runtimemgr.BuildBackendVulkan {
+				fmt.Printf("GPU Layers: auto (-fit)\n")
+			} else {
+				fmt.Printf("GPU Layers: all (99)\n")
+			}
 		}
 
 		// Context size note
