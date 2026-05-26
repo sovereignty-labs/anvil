@@ -169,8 +169,12 @@ func detectROCmGPUTargets() string {
 	targets := make([]string, 0, 4)
 	scanner := bufio.NewScanner(bytes.NewReader(out))
 	for scanner.Scan() {
-		for _, match := range rocmTargetPattern.FindAllString(scanner.Text(), -1) {
-			target := strings.ToLower(match)
+		line := scanner.Text()
+		for _, match := range rocmTargetPattern.FindAllStringIndex(line, -1) {
+			target := strings.ToLower(line[match[0]:match[1]])
+			if rocmTargetIsGenericSuffix(line, match[1]) {
+				continue
+			}
 			if _, ok := seen[target]; ok {
 				continue
 			}
@@ -182,4 +186,11 @@ func detectROCmGPUTargets() string {
 		return "gfx1201"
 	}
 	return strings.Join(targets, ";")
+}
+
+func rocmTargetIsGenericSuffix(line string, matchEnd int) bool {
+	if matchEnd >= len(line) {
+		return false
+	}
+	return strings.HasPrefix(strings.ToLower(line[matchEnd:]), "-generic")
 }

@@ -598,6 +598,35 @@ func TestBuildCMakeArgsIncludesROCm(t *testing.T) {
 	}
 }
 
+func TestDetectROCmGPUTargetsIgnoresGenericSuffix(t *testing.T) {
+	tmpDir := t.TempDir()
+	rocminfo := filepath.Join(tmpDir, "rocminfo")
+	if err := os.WriteFile(rocminfo, []byte(`#!/bin/sh
+printf '%s\n' \
+  'Name: gfx1201' \
+  'Name: gfx12-generic'
+`), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	oldLookPath := execLookPath
+	t.Cleanup(func() {
+		execLookPath = oldLookPath
+	})
+
+	execLookPath = func(file string) (string, error) {
+		if file == "rocminfo" {
+			return rocminfo, nil
+		}
+		return "", os.ErrNotExist
+	}
+
+	got := detectROCmGPUTargets()
+	if got != "gfx1201" {
+		t.Fatalf("detectROCmGPUTargets() = %q, want gfx1201", got)
+	}
+}
+
 func TestStripTopDir(t *testing.T) {
 	cases := map[string]string{
 		"llama-b9275/llama-server":  "llama-server",
