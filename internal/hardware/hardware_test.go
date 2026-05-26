@@ -72,7 +72,7 @@ func TestDetectROCmGPUsMissingReturnsEmpty(t *testing.T) {
 	}
 }
 
-func TestDetectFallsBackToROCmWhenNVIDIANoGPUs(t *testing.T) {
+func TestDetectWithNoNVIDIAGPUsPopulatesROCmGPUs(t *testing.T) {
 	dir := t.TempDir()
 	writeExecutableScript(t, dir, "nvidia-smi", "#!/bin/sh\nexit 0\n")
 	writeExecutableScript(t, dir, "rocm-smi", `#!/bin/sh
@@ -88,15 +88,51 @@ printf '%s\n' \
 	if err != nil {
 		t.Fatalf("Detect error: %v", err)
 	}
-	if len(inv.GPUs) != 1 {
-		t.Fatalf("expected 1 ROCm GPU from fallback, got %d", len(inv.GPUs))
+	if len(inv.GPUs) != 0 {
+		t.Fatalf("expected no NVIDIA GPUs, got %d", len(inv.GPUs))
 	}
-	gpu := inv.GPUs[0]
+	if len(inv.ROCmGPUs) != 1 {
+		t.Fatalf("expected 1 ROCm GPU from fallback, got %d", len(inv.ROCmGPUs))
+	}
+	gpu := inv.ROCmGPUs[0]
 	if gpu.Name != "AMD Radeon RX 7900 XTX" {
 		t.Fatalf("unexpected GPU name: %+v", gpu)
 	}
 	if gpu.VRAMTotal != 24576 || gpu.VRAMUsed != 8 || gpu.VRAMFree != 24568 {
 		t.Fatalf("unexpected GPU VRAM values: %+v", gpu)
+	}
+}
+
+func TestDetectWithMixedNVIDIAAndROCmGPUsPopulatesBothInventories(t *testing.T) {
+	dir := t.TempDir()
+	writeExecutableScript(t, dir, "nvidia-smi", `#!/bin/sh
+printf '%s\n' \
+  '0, NVIDIA GeForce RTX 2060, 6390, 4390, 2000, 00000000:01:00.0, 7.5'
+`)
+	writeExecutableScript(t, dir, "rocm-smi", `#!/bin/sh
+printf '%s\n' \
+  'GPU,Metric,Value' \
+  'GPU[0],Device Name,AMD Radeon RX 7900 XTX' \
+  'GPU[0],VRAM Total Memory (B),25769803776' \
+  'GPU[0],VRAM Total Used Memory (B),8388608'
+`)
+	t.Setenv("PATH", dir)
+
+	inv, err := Detect()
+	if err != nil {
+		t.Fatalf("Detect error: %v", err)
+	}
+	if len(inv.GPUs) != 1 {
+		t.Fatalf("expected 1 NVIDIA GPU, got %d", len(inv.GPUs))
+	}
+	if inv.GPUs[0].Name != "NVIDIA GeForce RTX 2060" {
+		t.Fatalf("unexpected NVIDIA GPU: %+v", inv.GPUs[0])
+	}
+	if len(inv.ROCmGPUs) != 1 {
+		t.Fatalf("expected 1 ROCm GPU, got %d", len(inv.ROCmGPUs))
+	}
+	if inv.ROCmGPUs[0].Name != "AMD Radeon RX 7900 XTX" {
+		t.Fatalf("unexpected ROCm GPU: %+v", inv.ROCmGPUs[0])
 	}
 }
 

@@ -527,6 +527,7 @@ func cloneInventoryWithoutGPUs(inv *hardware.Inventory) *hardware.Inventory {
 	}
 	clone := *inv
 	clone.GPUs = nil
+	clone.ROCmGPUs = nil
 	clone.VulkanGPUs = nil
 	return &clone
 }
@@ -541,7 +542,18 @@ func inventoryWithGPU(inv *hardware.Inventory, gpuIndex int, backend runtimemgr.
 			if gpu.Index == gpuIndex {
 				clone := *inv
 				clone.GPUs = nil
+				clone.ROCmGPUs = nil
 				clone.VulkanGPUs = []hardware.VulkanGPU{gpu}
+				return &clone, nil
+			}
+		}
+	case runtimemgr.BuildBackendROCm:
+		for _, gpu := range inv.ROCmGPUs {
+			if gpu.Index == gpuIndex {
+				clone := *inv
+				clone.GPUs = nil
+				clone.VulkanGPUs = nil
+				clone.ROCmGPUs = []hardware.GPU{gpu}
 				return &clone, nil
 			}
 		}
@@ -550,6 +562,7 @@ func inventoryWithGPU(inv *hardware.Inventory, gpuIndex int, backend runtimemgr.
 			if gpu.Index == gpuIndex {
 				clone := *inv
 				clone.GPUs = []hardware.GPU{gpu}
+				clone.ROCmGPUs = nil
 				clone.VulkanGPUs = nil
 				return &clone, nil
 			}
@@ -576,6 +589,12 @@ func describeDevice(gpuIndex string, inv *hardware.Inventory) string {
 			for _, gpu := range inv.VulkanGPUs {
 				if gpu.Index == idx {
 					return fmt.Sprintf("GPU %d (%s)", gpu.Index, gpu.Name)
+				}
+			}
+		case strings.HasPrefix(gpuIndex, "rocm:"):
+			for _, gpu := range inv.ROCmGPUs {
+				if gpu.Index == idx {
+					return fmt.Sprintf("GPU %d (%s)", gpu.Index, gpu.DisplayName())
 				}
 			}
 		default:
