@@ -328,8 +328,8 @@ func runLoad(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	// Resolve llama-server path
-	llamaServerFlag, err := resolveLlamaServerPath(cmd, cfg)
+	// Resolve llama-server path and backend
+	llamaServerFlag, backend, err := resolveLlamaServerPathWithRuntime(cmd, cfg, getRuntimeFlag(cmd))
 	if err != nil {
 		return err
 	}
@@ -364,7 +364,7 @@ func runLoad(cmd *cobra.Command, args []string) error {
 	fmt.Println("Computing flags...")
 	dryRun, _ := cmd.Flags().GetBool("dry-run")
 
-	result, err := process.ComputeFlags(meta, modelPath, inv, llamaServerFlag, 0)
+	result, err := process.ComputeFlags(meta, modelPath, inv, llamaServerFlag, 0, backend)
 	if err != nil {
 		return fmt.Errorf("flag computation failed: %w", err)
 	}
@@ -400,7 +400,7 @@ func runLoad(cmd *cobra.Command, args []string) error {
 		// Device selection reasoning
 		fileSizeMB := uint64(meta.FileSizeBytes) / 1024 / 1024
 		requiredVRAM := fileSizeMB + (fileSizeMB*20)/100
-		fmt.Println(GPUReasoning(inv, requiredVRAM))
+		fmt.Println(GPUReasoning(inv, requiredVRAM, backend))
 		fmt.Println()
 
 		// Device summary
@@ -523,8 +523,8 @@ func runLoad(cmd *cobra.Command, args []string) error {
 }
 
 // GPUReasoning is a wrapper for process.GPUReasoning.
-func GPUReasoning(inv *hardware.Inventory, requiredVRAM uint64) string {
-	return process.GPUReasoning(inv, requiredVRAM)
+func GPUReasoning(inv *hardware.Inventory, requiredVRAM uint64, backend ...runtimemgr.BuildBackend) string {
+	return process.GPUReasoning(inv, requiredVRAM, backend...)
 }
 
 // FormatMB is a wrapper for process.FormatMB.

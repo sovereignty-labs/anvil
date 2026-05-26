@@ -11,48 +11,55 @@ import (
 )
 
 func resolveLlamaServerPath(cmd *cobra.Command, cfg *config.Config) (string, error) {
-	return resolveLlamaServerPathWithRuntime(cmd, cfg, getRuntimeFlag(cmd))
+	path, _, err := resolveLlamaServerPathWithRuntime(cmd, cfg, getRuntimeFlag(cmd))
+	return path, err
 }
 
-func resolveLlamaServerPathWithRuntime(cmd *cobra.Command, cfg *config.Config, runtimeName string) (string, error) {
+func resolveLlamaServerPathWithRuntime(cmd *cobra.Command, cfg *config.Config, runtimeName string) (string, runtimemgr.BuildBackend, error) {
 	if path := getLlamaServerFlag(cmd); path != "" {
-		return path, nil
+		return path, runtimemgr.BuildBackendCUDA, nil
 	}
 
 	if runtimeName = strings.TrimSpace(runtimeName); runtimeName != "" {
-		path, err := runtimemgr.NewManager().ResolveNamed(runtimeName)
+		mgr := runtimemgr.NewManager()
+		path, err := mgr.ResolveNamed(runtimeName)
 		if err != nil {
-			return "", err
+			return "", runtimemgr.BuildBackendCUDA, err
 		}
-		return path, nil
+		return path, mgr.RuntimeBackend(runtimeName), nil
 	}
 
 	if path := os.Getenv("NOLLAMA_LLAMA_SERVER"); path != "" {
-		return path, nil
+		return path, runtimemgr.BuildBackendCUDA, nil
 	}
 
 	if cfg != nil && cfg.LlamaServer != "" {
-		return cfg.LlamaServer, nil
+		return cfg.LlamaServer, runtimemgr.BuildBackendCUDA, nil
 	}
 
 	if cfg == nil {
 		if cfgPath := config.FindConfig(); cfgPath != "" {
 			loaded, err := config.Load(cfgPath)
 			if err != nil {
-				return "", err
+				return "", runtimemgr.BuildBackendCUDA, err
 			}
 			if loaded.LlamaServer != "" {
-				return loaded.LlamaServer, nil
+				return loaded.LlamaServer, runtimemgr.BuildBackendCUDA, nil
 			}
 		}
 	}
 
-	path, err := runtimemgr.NewManager().Resolve()
+	mgr := runtimemgr.NewManager()
+	activeName, err := mgr.ActiveName()
+	if err != nil {
+		return "", runtimemgr.BuildBackendCUDA, err
+	}
+	path, err := mgr.Resolve()
 	if err == nil {
-		return path, nil
+		return path, mgr.RuntimeBackend(activeName), nil
 	}
 
-	return "", fmt.Errorf("no llama-server found. Run `nollama runtime install` or set --llama-server")
+	return "", runtimemgr.BuildBackendCUDA, fmt.Errorf("no llama-server found. Run `nollama runtime install` or set --llama-server")
 }
 
 func getRuntimeFlag(cmd *cobra.Command) string {

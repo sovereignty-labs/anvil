@@ -15,12 +15,14 @@ import (
 	"time"
 
 	"github.com/sovereignty-labs/nollama/internal/hardware"
+	runtimemgr "github.com/sovereignty-labs/nollama/internal/runtime"
 )
 
 // StartOpts holds the configuration for starting a new llama-server process.
 type StartOpts struct {
-	ModelPath    string   // absolute path to the GGUF model
-	LlamaServer  string   // path to llama-server binary
+	ModelPath    string // absolute path to the GGUF model
+	LlamaServer  string // path to llama-server binary
+	Backend      runtimemgr.BuildBackend
 	GPU          int      // GPU index (-1 for CPU)
 	ForceCPU     bool     // force CPU inference
 	ExtraFlags   []string // additional llama-server flags
@@ -36,7 +38,7 @@ type ProcessInfo struct {
 	ModelPath string    // absolute path to the GGUF model
 	ModelName string    // human-readable model name from GGUF metadata
 	Port      int       // llama-server HTTP port
-	GPUIndex  string    // e.g. "cuda:0", "cpu"
+	GPUIndex  string    // e.g. "cuda:0", "vulkan:1", "cpu"
 	StartTime time.Time // when the process was started
 	Flags     []string  // the computed (and merged) flags used to launch
 	cmd       *exec.Cmd // the underlying exec.Cmd (for stopping)
@@ -147,27 +149,40 @@ func (m *Manager) openLogFile(port int) (*os.File, error) {
 // pointing LD_LIBRARY_PATH at the runtime directory so the bundled .so files
 // next to llama-server resolve.
 //
-// When gpuIndex >= 0 and forceCPU is false, sets CUDA_VISIBLE_DEVICES=<index>
-// so llama-server only sees that single device (it becomes its device 0).
-// In CPU mode, clears CUDA_VISIBLE_DEVICES so GPU auto-fit doesn't hang.
-// Any pre-existing CUDA_VISIBLE_DEVICES in the parent env is stripped first
-// to avoid a stale value sneaking in from the shell.
+// When gpuIndex >= 0 and forceCPU is false, sets the backend-appropriate GPU
+// selector for the child process (CUDA_VISIBLE_DEVICES for CUDA, GGML_VK_DEVICE
+// for Vulkan) so llama-server only sees that single device.
+// In CPU mode, clears both selectors so GPU auto-fit doesn't hang.
+// Any pre-existing GPU selector in the parent env is stripped first to avoid a
+// stale value sneaking in from the shell.
 //
 // LD_LIBRARY_PATH is prepended with filepath.Dir(llamaServerPath) so the
 // release tarball's libllama-common.so / libllama.so / libggml*.so resolve
 // without needing a system-wide install. Empty llamaServerPath skips that.
 // extraEnv carries caller-supplied overrides such as GGML_VK_DEVICE.
-func buildChildEnv(gpuIndex int, forceCPU bool, llamaServerPath string, extraEnv map[string]string) []string {
+func buildChildEnv(backend runtimemgr.BuildBackend, gpuIndex int, forceCPU bool, llamaServerPath string, extraEnv map[string]string) []string {
+	backend = normalizeBackend(backend)
 	parent := os.Environ()
 	filtered := make([]string, 0, len(parent)+len(extraEnv)+2)
 	existingLDP := ""
 	overrides := make(map[string]struct{}, len(extraEnv))
+	hasCUDAOverride := false
+	hasVulkanOverride := false
 	for key := range extraEnv {
 		if strings.TrimSpace(key) == "" {
 			continue
 		}
-		if key == "CUDA_VISIBLE_DEVICES" || key == "LD_LIBRARY_PATH" {
+		if key == "LD_LIBRARY_PATH" {
 			continue
+		}
+		if forceCPU && (key == "CUDA_VISIBLE_DEVICES" || key == "GGML_VK_DEVICE") {
+			continue
+		}
+		if key == "CUDA_VISIBLE_DEVICES" {
+			hasCUDAOverride = true
+		}
+		if key == "GGML_VK_DEVICE" {
+			hasVulkanOverride = true
 		}
 		overrides[key] = struct{}{}
 	}
@@ -175,6 +190,8 @@ func buildChildEnv(gpuIndex int, forceCPU bool, llamaServerPath string, extraEnv
 		key, _, _ := strings.Cut(e, "=")
 		switch {
 		case strings.HasPrefix(e, "CUDA_VISIBLE_DEVICES="):
+			// drop — we set our own below
+		case strings.HasPrefix(e, "GGML_VK_DEVICE="):
 			// drop — we set our own below
 		case strings.HasPrefix(e, "LD_LIBRARY_PATH="):
 			existingLDP = strings.TrimPrefix(e, "LD_LIBRARY_PATH=")
@@ -187,8 +204,17 @@ func buildChildEnv(gpuIndex int, forceCPU bool, llamaServerPath string, extraEnv
 	switch {
 	case forceCPU:
 		filtered = append(filtered, "CUDA_VISIBLE_DEVICES=")
+		filtered = append(filtered, "GGML_VK_DEVICE=")
 	case gpuIndex >= 0:
-		filtered = append(filtered, fmt.Sprintf("CUDA_VISIBLE_DEVICES=%d", gpuIndex))
+		if backend == runtimemgr.BuildBackendVulkan {
+			if !hasVulkanOverride {
+				filtered = append(filtered, fmt.Sprintf("GGML_VK_DEVICE=%d", gpuIndex))
+			}
+		} else {
+			if !hasCUDAOverride {
+				filtered = append(filtered, fmt.Sprintf("CUDA_VISIBLE_DEVICES=%d", gpuIndex))
+			}
+		}
 	}
 	if llamaServerPath != "" {
 		runtimeDir := filepath.Dir(llamaServerPath)
@@ -217,6 +243,16 @@ func buildChildEnv(gpuIndex int, forceCPU bool, llamaServerPath string, extraEnv
 func hasEnvOverride(overrides map[string]struct{}, key string) bool {
 	_, ok := overrides[key]
 	return ok
+}
+
+func selectedDeviceLabel(backend runtimemgr.BuildBackend, gpuIndex int, forceCPU bool) string {
+	if forceCPU || gpuIndex < 0 || backend == runtimemgr.BuildBackendCPU {
+		return "cpu"
+	}
+	if backend == runtimemgr.BuildBackendVulkan {
+		return fmt.Sprintf("vulkan:%d", gpuIndex)
+	}
+	return fmt.Sprintf("cuda:%d", gpuIndex)
 }
 
 // parseCUDADeviceIndex extracts N from a "cuda:N" device string. Returns -1
@@ -307,18 +343,12 @@ func (m *Manager) Start(result *Result, modelName string, passthrough []string) 
 	cmd.Stdout = logFile
 	cmd.Stderr = logFile
 
-	// Extract GPU index from SelectedDevice
-	gpuIndex := "cpu"
-	if !result.CPUFallback {
-		gpuIndex = result.SelectedDevice
-	}
-
 	procInfo := &ProcessInfo{
 		PID:       -1,
 		ModelPath: "", // Will be set by the caller
 		ModelName: modelName,
 		Port:      result.Port,
-		GPUIndex:  gpuIndex,
+		GPUIndex:  selectedDeviceLabel(result.Backend, result.GPUIndex, result.CPUFallback),
 		StartTime: time.Now(),
 		Flags:     flags,
 		cmd:       cmd,
@@ -326,9 +356,8 @@ func (m *Manager) Start(result *Result, modelName string, passthrough []string) 
 	}
 
 	// Isolate the spawned process to its assigned GPU (or hide all GPUs in CPU
-	// mode) so two llama-servers can't spread across the same device. With
-	// CUDA_VISIBLE_DEVICES=N, llama-server sees a single device as its index 0.
-	cmd.Env = buildChildEnv(parseCUDADeviceIndex(result.SelectedDevice), result.CPUFallback, llamaServerPath, nil)
+	// mode) so two llama-servers can't spread across the same device.
+	cmd.Env = buildChildEnv(result.Backend, result.GPUIndex, result.CPUFallback, llamaServerPath, nil)
 
 	// Start the process
 	if err := cmd.Start(); err != nil {
@@ -365,10 +394,13 @@ func (m *Manager) StartOptsStart(opts StartOpts) (int, error) {
 	// Build flags from opts
 	var flags []string
 
+	backend := normalizeBackend(opts.Backend)
 	// GPU/device selection
-	gpuIndex := "cpu"
+	gpuIndex := selectedDeviceLabel(backend, opts.GPU, opts.ForceCPU)
+	if backend == runtimemgr.BuildBackendCPU {
+		opts.ForceCPU = true
+	}
 	if !opts.ForceCPU && opts.GPU >= 0 {
-		gpuIndex = fmt.Sprintf("cuda:%d", opts.GPU)
 		flags = append(flags, "--n-gpu-layers", "99")
 	} else {
 		opts.ForceCPU = true
@@ -413,12 +445,12 @@ func (m *Manager) StartOptsStart(opts StartOpts) (int, error) {
 	cmd.Stderr = logFile
 
 	// Isolate the spawned process to its assigned GPU (or hide all GPUs in CPU
-	// mode). See buildChildEnv for details on CUDA_VISIBLE_DEVICES handling.
+	// mode). See buildChildEnv for details on GPU selector handling.
 	gpuForEnv := opts.GPU
 	if opts.ForceCPU {
 		gpuForEnv = -1
 	}
-	cmd.Env = buildChildEnv(gpuForEnv, opts.ForceCPU, opts.LlamaServer, opts.Env)
+	cmd.Env = buildChildEnv(backend, gpuForEnv, opts.ForceCPU, opts.LlamaServer, opts.Env)
 
 	modelName := filepath.Base(opts.ModelPath)
 
