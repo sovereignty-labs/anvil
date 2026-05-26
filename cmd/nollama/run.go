@@ -39,7 +39,7 @@ Examples:
 }
 
 func init() {
-	runModelCmd.Flags().Int("gpu", -1, "GPU index to load on")
+	runModelCmd.Flags().Int("gpu", -1, "GPU index (-1 for auto)")
 	runModelCmd.Flags().Bool("cpu", false, "Force CPU inference")
 	runModelCmd.Flags().String("runtime", "", "Use a specific llama-server runtime")
 	runModelCmd.Flags().Int("port", 0, "Pin llama-server to this port instead of auto-assigning")
