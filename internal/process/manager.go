@@ -151,7 +151,7 @@ func (m *Manager) openLogFile(port int) (*os.File, error) {
 //
 // When gpuIndex >= 0 and forceCPU is false, sets the backend-appropriate GPU
 // selector for the child process (CUDA_VISIBLE_DEVICES for CUDA, HIP_VISIBLE_DEVICES
-// for ROCm, GGML_VK_DEVICE for Vulkan) so llama-server only sees that single device.
+// for ROCm, GGML_VK_VISIBLE_DEVICES for Vulkan) so llama-server only sees that single device.
 // In CPU mode, clears all selectors so GPU auto-fit doesn't hang.
 // Any pre-existing GPU selector in the parent env is stripped first to avoid a
 // stale value sneaking in from the shell.
@@ -159,7 +159,7 @@ func (m *Manager) openLogFile(port int) (*os.File, error) {
 // LD_LIBRARY_PATH is prepended with filepath.Dir(llamaServerPath) so the
 // release tarball's libllama-common.so / libllama.so / libggml*.so resolve
 // without needing a system-wide install. Empty llamaServerPath skips that.
-// extraEnv carries caller-supplied overrides such as GGML_VK_DEVICE or HIP_VISIBLE_DEVICES.
+// extraEnv carries caller-supplied overrides such as GGML_VK_VISIBLE_DEVICES or HIP_VISIBLE_DEVICES.
 func buildChildEnv(backend runtimemgr.BuildBackend, gpuIndex int, forceCPU bool, llamaServerPath string, extraEnv map[string]string) []string {
 	backend = normalizeBackend(backend)
 	parent := os.Environ()
@@ -176,7 +176,7 @@ func buildChildEnv(backend runtimemgr.BuildBackend, gpuIndex int, forceCPU bool,
 		if key == "LD_LIBRARY_PATH" {
 			continue
 		}
-		if forceCPU && (key == "CUDA_VISIBLE_DEVICES" || key == "HIP_VISIBLE_DEVICES" || key == "GGML_VK_DEVICE") {
+		if forceCPU && (key == "CUDA_VISIBLE_DEVICES" || key == "HIP_VISIBLE_DEVICES" || key == "GGML_VK_VISIBLE_DEVICES") {
 			continue
 		}
 		if key == "CUDA_VISIBLE_DEVICES" {
@@ -185,7 +185,7 @@ func buildChildEnv(backend runtimemgr.BuildBackend, gpuIndex int, forceCPU bool,
 		if key == "HIP_VISIBLE_DEVICES" {
 			hasHIPOverride = true
 		}
-		if key == "GGML_VK_DEVICE" {
+		if key == "GGML_VK_VISIBLE_DEVICES" {
 			hasVulkanOverride = true
 		}
 		overrides[key] = struct{}{}
@@ -197,7 +197,7 @@ func buildChildEnv(backend runtimemgr.BuildBackend, gpuIndex int, forceCPU bool,
 			// drop — we set our own below
 		case strings.HasPrefix(e, "HIP_VISIBLE_DEVICES="):
 			// drop — we set our own below
-		case strings.HasPrefix(e, "GGML_VK_DEVICE="):
+		case strings.HasPrefix(e, "GGML_VK_VISIBLE_DEVICES="):
 			// drop — we set our own below
 		case strings.HasPrefix(e, "LD_LIBRARY_PATH="):
 			existingLDP = strings.TrimPrefix(e, "LD_LIBRARY_PATH=")
@@ -211,11 +211,11 @@ func buildChildEnv(backend runtimemgr.BuildBackend, gpuIndex int, forceCPU bool,
 	case forceCPU:
 		filtered = append(filtered, "CUDA_VISIBLE_DEVICES=")
 		filtered = append(filtered, "HIP_VISIBLE_DEVICES=")
-		filtered = append(filtered, "GGML_VK_DEVICE=")
+		filtered = append(filtered, "GGML_VK_VISIBLE_DEVICES=")
 	case gpuIndex >= 0:
 		if backend == runtimemgr.BuildBackendVulkan {
 			if !hasVulkanOverride {
-				filtered = append(filtered, fmt.Sprintf("GGML_VK_DEVICE=%d", gpuIndex))
+				filtered = append(filtered, fmt.Sprintf("GGML_VK_VISIBLE_DEVICES=%d", gpuIndex))
 			}
 		} else if backend == runtimemgr.BuildBackendROCm {
 			if !hasHIPOverride {

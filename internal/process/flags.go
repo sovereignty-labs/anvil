@@ -110,6 +110,8 @@ func ComputeFlags(meta *model.GGUFMetadata, modelPath string, inv *hardware.Inve
 		)
 		if effectiveBackend != runtimemgr.BuildBackendVulkan {
 			result.Flags = append(result.Flags, "--n-gpu-layers", "99")
+		} else {
+			result.Flags = append(result.Flags, "--n-gpu-layers", "-1")
 		}
 		result.VRAMTotalMB = availableVRAM
 		if bestGPU != nil {
