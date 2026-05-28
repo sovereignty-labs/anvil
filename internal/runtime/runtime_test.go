@@ -37,6 +37,35 @@ func TestDetectPlatformWithNvidiaSmi(t *testing.T) {
 	}
 }
 
+func TestDetectPlatformWithRocmSmi(t *testing.T) {
+	tmpDir := t.TempDir()
+	script := filepath.Join(tmpDir, "rocm-smi")
+	if err := os.WriteFile(script, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	oldLookPath := execLookPath
+	t.Cleanup(func() {
+		execLookPath = oldLookPath
+	})
+
+	execLookPath = func(file string) (string, error) {
+		switch file {
+		case "nvidia-smi":
+			return "", os.ErrNotExist
+		case "rocm-smi":
+			return script, nil
+		default:
+			return "", os.ErrNotExist
+		}
+	}
+
+	platform := DetectPlatform()
+	if platform.ROCm == "" {
+		t.Fatal("expected ROCm to be detected when rocm-smi is available")
+	}
+}
+
 func TestSelectAsset(t *testing.T) {
 	assets := []ReleaseAsset{
 		{Name: "llama-b9174-bin-ubuntu-x64.zip", Size: 100},
@@ -97,6 +126,21 @@ func TestSelectAssetPrefersCpuOverRocmWithoutCuda(t *testing.T) {
 	}
 	if selected.Name != "llama-b9174-bin-ubuntu-x64.zip" {
 		t.Fatalf("cpu selection = %q", selected.Name)
+	}
+}
+
+func TestSelectAssetPrefersRocmWhenDetected(t *testing.T) {
+	assets := []ReleaseAsset{
+		{Name: "llama-b9174-bin-ubuntu-x64.zip", Size: 100},
+		{Name: "llama-b9174-bin-ubuntu-x64-rocm-6.2.tar.gz", Size: 200},
+	}
+
+	selected, err := SelectAsset(assets, Platform{OS: "linux", Arch: "amd64", ROCm: "available"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if selected.Name != "llama-b9174-bin-ubuntu-x64-rocm-6.2.tar.gz" {
+		t.Fatalf("rocm selection = %q", selected.Name)
 	}
 }
 
@@ -691,26 +735,6 @@ func TestExtractRuntimeFromZipFlattensAndExtractsAll(t *testing.T) {
 	}
 }
 
-func TestSelectAssetWarnsWhenNoCUDABuild(t *testing.T) {
-	var sink bytes.Buffer
-	stderrWriter = &sink
-	t.Cleanup(func() { stderrWriter = os.Stderr })
-
-	platform := Platform{OS: "linux", Arch: "amd64", CUDA: "available"}
-	assets := []ReleaseAsset{
-		{Name: "llama-b9275-bin-ubuntu-x64.tar.gz"},
-	}
-	if _, err := SelectAsset(assets, platform); err != nil {
-		t.Fatalf("SelectAsset: %v", err)
-	}
-	if !strings.Contains(sink.String(), "CUDA detected but no CUDA build") {
-		t.Errorf("expected CUDA warning, got %q", sink.String())
-	}
-	if !strings.Contains(sink.String(), "nollama runtime build") {
-		t.Errorf("expected hint to runtime build, got %q", sink.String())
-	}
-}
-
 func TestDeriveBuildRuntimeName(t *testing.T) {
 	cases := []struct {
 		repo, branch, want string
@@ -725,6 +749,92 @@ func TestDeriveBuildRuntimeName(t *testing.T) {
 		if got := deriveBuildRuntimeName(c.repo, c.branch); got != c.want {
 			t.Errorf("deriveBuildRuntimeName(%q, %q) = %q, want %q", c.repo, c.branch, got, c.want)
 		}
+	}
+}
+
+func TestAutoBuildChecksRequiredToolsBeforeAttemptingBuild(t *testing.T) {
+	dir := t.TempDir()
+	mgr := &Manager{runtimesDir: dir}
+
+	oldLookPath := execLookPath
+	t.Cleanup(func() {
+		execLookPath = oldLookPath
+	})
+
+	execLookPath = func(string) (string, error) {
+		return "", os.ErrNotExist
+	}
+
+	err := mgr.AutoBuild("llama-test")
+	if err == nil {
+		t.Fatal("expected AutoBuild to fail when build tools are missing")
+	}
+	if !strings.Contains(err.Error(), "git is required") {
+		t.Fatalf("AutoBuild error = %v, want git prerequisite failure", err)
+	}
+}
+
+func TestInstallTriggersAutoBuildWhenCudaAssetMissing(t *testing.T) {
+	dir := t.TempDir()
+	mgr := &Manager{runtimesDir: dir}
+
+	oldDetectPlatform := detectPlatformFn
+	oldFetchLatest := fetchLatestReleaseFn
+	oldFetchRelease := fetchReleaseFn
+	oldAutoBuild := autoBuildRuntimeFn
+	t.Cleanup(func() {
+		detectPlatformFn = oldDetectPlatform
+		fetchLatestReleaseFn = oldFetchLatest
+		fetchReleaseFn = oldFetchRelease
+		autoBuildRuntimeFn = oldAutoBuild
+	})
+
+	detectPlatformFn = func() Platform {
+		return Platform{OS: "linux", Arch: "amd64", CUDA: "available"}
+	}
+	fetchLatestReleaseFn = func() (*Release, error) {
+		return &Release{
+			TagName: "b123",
+			Assets: []ReleaseAsset{
+				{Name: "llama-b123-bin-ubuntu-x64.zip", DownloadURL: "https://example.com/cpu.zip", Size: 111},
+			},
+		}, nil
+	}
+	fetchReleaseFn = func(string) (*Release, error) {
+		t.Fatal("FetchRelease should not be called when version is empty")
+		return nil, nil
+	}
+
+	called := false
+	autoBuildRuntimeFn = func(m *Manager, name, ref string, backend BuildBackend) (*RuntimeInfo, error) {
+		called = true
+		if name != "llama-b123" {
+			t.Fatalf("AutoBuild name = %q, want llama-b123", name)
+		}
+		if ref != "b123" {
+			t.Fatalf("AutoBuild ref = %q, want b123", ref)
+		}
+		if backend != BuildBackendCUDA {
+			t.Fatalf("AutoBuild backend = %q, want cuda", backend)
+		}
+		return &RuntimeInfo{
+			Name:    name,
+			Path:    filepath.Join(m.runtimesDir, name, runtimeBinaryName()),
+			Version: "b123",
+			Source:  "build",
+			Active:  true,
+		}, nil
+	}
+
+	info, err := mgr.Install("", false)
+	if err != nil {
+		t.Fatalf("Install() error: %v", err)
+	}
+	if !called {
+		t.Fatal("expected Install to trigger AutoBuild")
+	}
+	if info.Source != "build" {
+		t.Fatalf("Install() source = %q, want build", info.Source)
 	}
 }
 

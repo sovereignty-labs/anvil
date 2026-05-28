@@ -15,6 +15,7 @@ type Platform struct {
 	OS   string // "linux", "darwin", "windows"
 	Arch string // "amd64", "arm64"
 	CUDA string // "available" when NVIDIA CUDA is available, otherwise empty
+	ROCm string // "available" when ROCm is available, otherwise empty
 }
 
 var (
@@ -39,6 +40,14 @@ func DetectPlatform() Platform {
 			p.CUDA = "available"
 		}
 	}
+	if p.CUDA == "" {
+		if path, err := execLookPath("rocm-smi"); err == nil && path != "" {
+			cmd := execCommand(path)
+			if err := cmd.Run(); err == nil {
+				p.ROCm = "available"
+			}
+		}
+	}
 
 	return p
 }
@@ -59,8 +68,8 @@ func SelectAsset(assets []ReleaseAsset, platform Platform) (*ReleaseAsset, error
 		for _, asset := range assets {
 			names = append(names, asset.Name)
 		}
-		return nil, fmt.Errorf("no llama.cpp release asset matched platform %s/%s (CUDA=%t); available: %s",
-			platform.OS, platform.Arch, platform.CUDA != "", strings.Join(names, ", "))
+		return nil, fmt.Errorf("no llama.cpp release asset matched platform %s/%s (CUDA=%t, ROCm=%t); available: %s",
+			platform.OS, platform.Arch, platform.CUDA != "", platform.ROCm != "", strings.Join(names, ", "))
 	}
 
 	sort.Slice(candidates, func(i, j int) bool {
@@ -74,15 +83,6 @@ func SelectAsset(assets []ReleaseAsset, platform Platform) (*ReleaseAsset, error
 	})
 
 	selected := candidates[0].asset
-	if platform.CUDA != "" && !strings.Contains(strings.ToLower(selected.Name), "cuda") {
-		// Linux releases don't ship a prebuilt CUDA llama-server. Make the
-		// degradation visible so users running on NVIDIA hardware know to
-		// pivot to `nollama runtime build` or supply a custom binary.
-		fmt.Fprintln(stderrWriter, "Warning: CUDA detected but no CUDA build available for this platform in this release.")
-		fmt.Fprintln(stderrWriter, "  The downloaded runtime is CPU-only.")
-		fmt.Fprintln(stderrWriter, "  For GPU acceleration, run: nollama runtime build")
-		fmt.Fprintln(stderrWriter, "  Or compile llama.cpp with CUDA and use: nollama runtime add <name> /path/to/llama-server")
-	}
 	return &selected, nil
 }
 
@@ -123,6 +123,17 @@ func scoreAsset(asset ReleaseAsset, platform Platform) (int, bool) {
 		} else {
 			score += 100
 		}
+	} else if platform.ROCm != "" {
+		if sycl || vulkan {
+			return 0, false
+		}
+		if rocm {
+			score += 200
+		} else if cuda {
+			score += 10
+		} else {
+			score += 100
+		}
 	} else {
 		if cuda {
 			score += 20
@@ -138,6 +149,35 @@ func scoreAsset(asset ReleaseAsset, platform Platform) (int, bool) {
 	}
 
 	return score, true
+}
+
+func assetBackend(name string) BuildBackend {
+	lower := strings.ToLower(name)
+	switch {
+	case strings.Contains(lower, "cuda"):
+		return BuildBackendCUDA
+	case strings.Contains(lower, "rocm"), strings.Contains(lower, "hip"):
+		return BuildBackendROCm
+	default:
+		return BuildBackendCPU
+	}
+}
+
+func buildBackendForInstall(platform Platform, assetName string) (BuildBackend, bool) {
+	if platform.OS != "linux" {
+		return BuildBackendAuto, false
+	}
+
+	backend := assetBackend(assetName)
+
+	switch {
+	case platform.CUDA != "" && backend != BuildBackendCUDA:
+		return BuildBackendCUDA, true
+	case platform.ROCm != "" && backend != BuildBackendROCm:
+		return BuildBackendROCm, true
+	default:
+		return BuildBackendAuto, false
+	}
 }
 
 func hasArchiveSuffix(name string) bool {

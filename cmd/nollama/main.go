@@ -212,7 +212,7 @@ var runtimeCmd = &cobra.Command{
 
 var runtimeInstallCmd = &cobra.Command{
 	Use:   "install",
-	Short: "Download pre-built llama-server from GitHub Releases",
+	Short: "Download llama-server from GitHub Releases or auto-build from source",
 	RunE:  runRuntimeInstall,
 }
 
