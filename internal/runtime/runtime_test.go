@@ -752,10 +752,7 @@ func TestDeriveBuildRuntimeName(t *testing.T) {
 	}
 }
 
-func TestAutoBuildChecksRequiredToolsBeforeAttemptingBuild(t *testing.T) {
-	dir := t.TempDir()
-	mgr := &Manager{runtimesDir: dir}
-
+func TestBuildPrereqsAggregateMissingTools(t *testing.T) {
 	oldLookPath := execLookPath
 	t.Cleanup(func() {
 		execLookPath = oldLookPath
@@ -765,12 +762,33 @@ func TestAutoBuildChecksRequiredToolsBeforeAttemptingBuild(t *testing.T) {
 		return "", os.ErrNotExist
 	}
 
-	err := mgr.AutoBuild("llama-test")
+	_, err := checkBuildTools(BuildBackendCUDA)
 	if err == nil {
-		t.Fatal("expected AutoBuild to fail when build tools are missing")
+		t.Fatal("expected prerequisite check to fail when build tools are missing")
 	}
-	if !strings.Contains(err.Error(), "git is required") {
-		t.Fatalf("AutoBuild error = %v, want git prerequisite failure", err)
+	want := "sudo apt install git cmake build-essential nvidia-cuda-toolkit"
+	if !strings.Contains(err.Error(), want) {
+		t.Fatalf("prerequisite error = %v, want command %q", err, want)
+	}
+}
+
+func TestAutoBuildPrereqsAggregateMissingTools(t *testing.T) {
+	oldLookPath := execLookPath
+	t.Cleanup(func() {
+		execLookPath = oldLookPath
+	})
+
+	execLookPath = func(string) (string, error) {
+		return "", os.ErrNotExist
+	}
+
+	_, _, err := checkAutoBuildPrereqs(BuildBackendROCm)
+	if err == nil {
+		t.Fatal("expected auto-build prerequisite check to fail when build tools are missing")
+	}
+	want := "sudo apt install git cmake build-essential rocm-hip-sdk"
+	if !strings.Contains(err.Error(), want) {
+		t.Fatalf("prerequisite error = %v, want command %q", err, want)
 	}
 }
 
