@@ -112,34 +112,34 @@ func findCUDAToolkit() (string, string) {
 	return "", ""
 }
 
-func checkAutoBuildPrereqs(backend BuildBackend) (string, error) {
+func checkAutoBuildPrereqs(backend BuildBackend) (string, string, error) {
 	if lookPathOrEmpty("git") == "" {
-		return "", fmt.Errorf("Error: git is required to build from source. Install with: sudo apt install git")
+		return "", "", fmt.Errorf("Error: git is required to build from source. Install with: sudo apt install git")
 	}
 	if lookPathOrEmpty("cmake") == "" {
-		return "", fmt.Errorf("Error: cmake is required to build from source. Install with: sudo apt install cmake")
+		return "", "", fmt.Errorf("Error: cmake is required to build from source. Install with: sudo apt install cmake")
 	}
 	if findCXXCompiler() == "" {
-		return "", fmt.Errorf("Error: a C++ compiler is required. Install with: sudo apt install build-essential")
+		return "", "", fmt.Errorf("Error: a C++ compiler is required. Install with: sudo apt install build-essential")
 	}
 
 	switch backend {
 	case BuildBackendCUDA:
-		if _, root := findCUDAToolkit(); root != "" {
-			return root, nil
+		if nvcc, root := findCUDAToolkit(); root != "" {
+			return nvcc, root, nil
 		}
-		return "", fmt.Errorf("Error: CUDA toolkit is required. Install with: sudo apt install cuda-toolkit")
+		return "", "", fmt.Errorf("Error: CUDA toolkit is required. Install with: sudo apt install cuda-toolkit")
 	case BuildBackendROCm:
 		if lookPathOrEmpty("hipcc") == "" {
-			return "", fmt.Errorf("Error: ROCm toolkit is required. Install the ROCm HIP toolchain so hipcc is available.")
+			return "", "", fmt.Errorf("Error: ROCm toolkit is required. Install the ROCm HIP toolchain so hipcc is available.")
 		}
-		return "", nil
+		return "", "", nil
 	default:
-		return "", nil
+		return "", "", nil
 	}
 }
 
-func autoBuildCMakeArgs(backend BuildBackend, toolkitRoot string) []string {
+func autoBuildCMakeArgs(backend BuildBackend, toolkitRoot string, nvccPath string) []string {
 	args := []string{
 		"-B", "build",
 		"-DCMAKE_BUILD_TYPE=Release",
@@ -154,6 +154,9 @@ func autoBuildCMakeArgs(backend BuildBackend, toolkitRoot string) []string {
 		args = append(args, "-DGGML_CUDA=ON")
 		if toolkitRoot != "" {
 			args = append(args, "-DCUDAToolkit_ROOT="+toolkitRoot)
+		}
+		if nvccPath != "" {
+			args = append(args, "-DCMAKE_CUDA_COMPILER="+nvccPath)
 		}
 	case BuildBackendROCm:
 		args = append(args, "-DGGML_HIP=ON", "-DGPU_TARGETS="+detectROCmGPUTargets())
@@ -204,7 +207,7 @@ func (m *Manager) autoBuild(name, ref string, backend BuildBackend) (*RuntimeInf
 		return nil, err
 	}
 
-	toolkitRoot, err := checkAutoBuildPrereqs(backend)
+	nvccPath, toolkitRoot, err := checkAutoBuildPrereqs(backend)
 	if err != nil {
 		return nil, err
 	}
@@ -229,7 +232,7 @@ func (m *Manager) autoBuild(name, ref string, backend BuildBackend) (*RuntimeInf
 		return nil, fmt.Errorf("git clone: %w", err)
 	}
 
-	cmakeArgs := autoBuildCMakeArgs(backend, toolkitRoot)
+	cmakeArgs := autoBuildCMakeArgs(backend, toolkitRoot, nvccPath)
 	fmt.Fprintf(os.Stderr, "\nConfiguring: cmake %s\n", strings.Join(cmakeArgs, " "))
 	if err := runBuildCmdEnv(srcDir, buildEnvWithCompiler(compiler), "cmake", cmakeArgs...); err != nil {
 		return nil, fmt.Errorf("cmake configure: %w", err)
