@@ -11,7 +11,7 @@ One Go binary. Plain GGUFs. Transparent llama-server under the hood. Federation 
 curl -fsSL https://github.com/sovereignty-labs/nollama/releases/download/latest/nollama-linux-amd64 \
   -o /usr/local/bin/nollama && chmod +x /usr/local/bin/nollama
 
-# Download a llama.cpp release binary (auto-detects your platform + GPU)
+# Download a llama.cpp release binary or build from source when needed
 nollama runtime install
 
 # Pull a model from HuggingFace
@@ -173,11 +173,14 @@ No orchestrator, no consensus protocol, no automatic failover. Each node is sove
 
 ## Runtime Management
 
-nollama manages llama-server binaries so you never have to compile anything:
+nollama manages llama-server binaries so you never have to compile anything in the common case:
 
 ```bash
 # Download the latest llama.cpp release (auto-detects platform + GPU)
 nollama runtime install
+
+# Force download-only behavior
+nollama runtime install --no-build
 
 # Use a fork (TurboQuant, ik_llama, etc.)
 nollama runtime add turbo /path/to/turbo-fork/llama-server
@@ -194,6 +197,21 @@ nollama runtime list
 # turbo        —        custom   ✓
 # mainline     —        custom   
 ```
+
+On Linux, `nollama runtime install` automatically builds `llama-server` from source with CUDA or ROCm support when ggml-org does not publish a matching GPU binary for your platform. That avoids silently falling back to a CPU-only runtime on NVIDIA and AMD systems.
+
+## Load Readiness
+
+`nollama load` waits for `llama-server` to pass its `/health` check before it reports success or registers a proxy route.
+
+If the process dies during model loading, nollama reads the log tail and returns an actionable error instead of a false success. Common cases include:
+
+- GPU BAR allocation failures
+- CUDA architecture mismatches
+- OOM during model loading
+- Unsupported model architectures for an older runtime
+
+The error response includes the log path so you can inspect the full crash output when needed.
 
 ## Hardware Profiles
 
@@ -305,7 +323,7 @@ sudo systemctl enable --now nollama
 
 ## Attribution
 
-nollama exists because of [llama.cpp](https://github.com/ggerganov/llama.cpp), created by Georgi Gerganov and maintained by hundreds of contributors. nollama does not modify, fork, or vendor llama.cpp. It manages llama-server processes and gets out of the way. The real work happens in llama.cpp.
+nollama exists because of [llama.cpp](https://github.com/ggml-org/llama.cpp), created by Georgi Gerganov and maintained by hundreds of contributors. nollama does not modify, fork, or vendor llama.cpp. It manages llama-server processes and gets out of the way. The real work happens in llama.cpp.
 
 [MCP](https://modelcontextprotocol.io/) (Model Context Protocol) by Anthropic.
 
