@@ -4,6 +4,7 @@ package process
 import (
 	"fmt"
 	"log/slog"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -30,6 +31,7 @@ type StartOpts struct {
 	Hardware     *hardware.Inventory
 	ReservedPort int // port that should be avoided (e.g. nollama proxy port)
 	PinnedPort   int // when > 0, bind to this exact port instead of auto-assigning
+	ReadyTimeout time.Duration
 }
 
 // ProcessInfo holds metadata for a tracked llama-server process.
@@ -43,6 +45,7 @@ type ProcessInfo struct {
 	Flags     []string  // the computed (and merged) flags used to launch
 	cmd       *exec.Cmd // the underlying exec.Cmd (for stopping)
 	logFile   *os.File  // where stdout/stderr are written
+	done      chan struct{}
 }
 
 // ProcessStatus reports whether a ProcessInfo's process is running.
@@ -90,6 +93,15 @@ func init() {
 	}
 	_ = os.MkdirAll(defaultManager.logDir, 0o755)
 }
+
+var (
+	readinessTimeout      = 60 * time.Second
+	readinessPollInterval = time.Second
+	readinessHTTPClient   = &http.Client{Timeout: 2 * time.Second}
+	waitForReadyFunc      = func(m *Manager, port, pid int, timeout time.Duration) error {
+		return m.waitForReady(port, pid, timeout)
+	}
+)
 
 // GetManager returns the singleton Manager instance.
 func GetManager() *Manager {
@@ -142,6 +154,21 @@ func (m *Manager) openLogFile(port int) (*os.File, error) {
 	}
 	name := fmt.Sprintf("llama-server-%d.log", port)
 	return os.OpenFile(filepath.Join(m.logDir, name), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+}
+
+func (m *Manager) logPath(port int) string {
+	return filepath.Join(m.logDir, fmt.Sprintf("llama-server-%d.log", port))
+}
+
+func (p *ProcessInfo) startExitWatcher() {
+	if p == nil || p.cmd == nil {
+		return
+	}
+	p.done = make(chan struct{})
+	go func() {
+		_ = p.cmd.Wait()
+		close(p.done)
+	}()
 }
 
 // buildChildEnv returns the environment for a spawned llama-server process,
@@ -330,9 +357,9 @@ func MergePassthroughFlags(computed []string, passthrough []string) []string {
 // It captures stdout/stderr to log files in the manager's log directory.
 func (m *Manager) Start(result *Result, modelName string, passthrough []string) (*ProcessInfo, error) {
 	m.mu.Lock()
-	defer m.mu.Unlock()
 
 	if err := m.ensureLogDir(); err != nil {
+		m.mu.Unlock()
 		return nil, fmt.Errorf("failed to prepare log directory: %w", err)
 	}
 
@@ -348,6 +375,7 @@ func (m *Manager) Start(result *Result, modelName string, passthrough []string) 
 	// Open log file
 	logFile, err := m.openLogFile(result.Port)
 	if err != nil {
+		m.mu.Unlock()
 		return nil, fmt.Errorf("failed to open log file: %w", err)
 	}
 
@@ -376,14 +404,25 @@ func (m *Manager) Start(result *Result, modelName string, passthrough []string) 
 	// Start the process
 	if err := cmd.Start(); err != nil {
 		logFile.Close()
+		m.mu.Unlock()
 		return nil, fmt.Errorf("failed to start llama-server: %w", err)
 	}
 
 	procInfo.PID = cmd.Process.Pid
+	procInfo.startExitWatcher()
 
 	// Track the process
 	m.procs[procInfo.PID] = procInfo
 	m.portMap[procInfo.Port] = procInfo
+
+	timeout := result.ReadyTimeout
+	m.mu.Unlock()
+	if timeout > 0 {
+		if err := waitForReadyFunc(m, procInfo.Port, procInfo.PID, timeout); err != nil {
+			m.stopProcess(procInfo)
+			return nil, err
+		}
+	}
 
 	return procInfo, nil
 }
@@ -399,9 +438,9 @@ func (m *Manager) StartOptsStart(opts StartOpts) (int, error) {
 	}
 
 	m.mu.Lock()
-	defer m.mu.Unlock()
 
 	if err := m.ensureLogDir(); err != nil {
+		m.mu.Unlock()
 		return 0, fmt.Errorf("failed to prepare log directory: %w", err)
 	}
 
@@ -449,6 +488,7 @@ func (m *Manager) StartOptsStart(opts StartOpts) (int, error) {
 	// Open log file
 	logFile, err := m.openLogFile(port)
 	if err != nil {
+		m.mu.Unlock()
 		return 0, fmt.Errorf("failed to open log file: %w", err)
 	}
 
@@ -483,23 +523,28 @@ func (m *Manager) StartOptsStart(opts StartOpts) (int, error) {
 	// Start the process
 	if err := cmd.Start(); err != nil {
 		logFile.Close()
+		m.mu.Unlock()
 		return 0, fmt.Errorf("failed to start llama-server: %w", err)
 	}
 
 	procInfo.PID = cmd.Process.Pid
-
-	// Verify the child process is alive immediately after spawning
-	time.Sleep(500 * time.Millisecond)
-	err = cmd.Process.Signal(syscall.Signal(0))
-	if err != nil {
-		m.cleanupProcess(procInfo)
-		logFile.Close()
-		return 0, fmt.Errorf("llama-server process %d exited immediately (zombie/defunct): %w", procInfo.PID, err)
-	}
+	// Start a waiter so readiness polling can observe process exit without
+	// blocking the eventual Stop/cleanup path.
+	procInfo.startExitWatcher()
 
 	// Track the process
 	m.procs[procInfo.PID] = procInfo
 	m.portMap[procInfo.Port] = procInfo
+	m.mu.Unlock()
+
+	timeout := opts.ReadyTimeout
+	if timeout <= 0 {
+		timeout = readinessTimeout
+	}
+	if err := waitForReadyFunc(m, procInfo.Port, procInfo.PID, timeout); err != nil {
+		m.stopProcess(procInfo)
+		return 0, err
+	}
 
 	return port, nil
 }
@@ -578,18 +623,17 @@ func (m *Manager) stopProcess(proc *ProcessInfo) *ProcessInfo {
 	}
 
 	// Wait up to 1 second for graceful shutdown
-	done := make(chan error, 1)
-	go func() {
-		done <- proc.cmd.Wait()
-	}()
-
-	select {
-	case <-done:
-		// Process exited gracefully
-	case <-time.After(1 * time.Second):
-		// Force kill
-		proc.cmd.Process.Kill()
-		<-done
+	if proc.done != nil {
+		select {
+		case <-proc.done:
+			// Process exited gracefully
+		case <-time.After(1 * time.Second):
+			// Force kill
+			_ = proc.cmd.Process.Kill()
+			<-proc.done
+		}
+	} else {
+		time.Sleep(1 * time.Second)
 	}
 
 	m.cleanupProcess(proc)
@@ -605,6 +649,97 @@ func (m *Manager) cleanupProcess(proc *ProcessInfo) {
 	if proc.logFile != nil {
 		proc.logFile.Close()
 		proc.logFile = nil
+	}
+}
+
+func (m *Manager) waitForReady(port, pid int, timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	healthURL := fmt.Sprintf("http://127.0.0.1:%d/health", port)
+
+	for time.Now().Before(deadline) {
+		if !m.isProcessAlive(pid) {
+			return m.diagnoseCrash(port)
+		}
+
+		resp, err := readinessHTTPClient.Get(healthURL)
+		if err == nil && resp.StatusCode == http.StatusOK {
+			_ = resp.Body.Close()
+			return nil
+		}
+		if resp != nil {
+			_ = resp.Body.Close()
+		}
+
+		time.Sleep(readinessPollInterval)
+	}
+
+	if !m.isProcessAlive(pid) {
+		return m.diagnoseCrash(port)
+	}
+
+	logPath := m.logPath(port)
+	return fmt.Errorf("llama-server did not become ready within %v; check the log: %s", timeout, logPath)
+}
+
+func (m *Manager) isProcessAlive(pid int) bool {
+	if pid <= 0 {
+		return false
+	}
+	m.mu.RLock()
+	proc := m.procs[pid]
+	m.mu.RUnlock()
+	if proc == nil || proc.done == nil {
+		return false
+	}
+	select {
+	case <-proc.done:
+		return false
+	default:
+		return true
+	}
+}
+
+func (m *Manager) diagnoseCrash(port int) error {
+	logPath := m.logPath(port)
+	data, err := os.ReadFile(logPath)
+	if err != nil {
+		return fmt.Errorf("llama-server crashed during model loading. Check the log: %s\n  This usually means the runtime is too old for this model. Try: nollama runtime install", logPath)
+	}
+
+	tail := lastLogLines(string(data), 50)
+	diagnosis := classifyCrashLog(tail)
+	if diagnosis == "" {
+		diagnosis = fmt.Sprintf("llama-server crashed during model loading. Check the log: %s\n  This usually means the runtime is too old for this model. Try: nollama runtime install", logPath)
+	} else {
+		diagnosis = fmt.Sprintf("llama-server crashed during model loading. Check the log: %s\n  %s", logPath, diagnosis)
+	}
+	return fmt.Errorf("%s", diagnosis)
+}
+
+func lastLogLines(content string, limit int) string {
+	if limit <= 0 || content == "" {
+		return ""
+	}
+	lines := strings.Split(strings.ReplaceAll(content, "\r\n", "\n"), "\n")
+	if len(lines) > limit {
+		lines = lines[len(lines)-limit:]
+	}
+	return strings.Join(lines, "\n")
+}
+
+func classifyCrashLog(logText string) string {
+	lower := strings.ToLower(logText)
+	switch {
+	case strings.Contains(lower, "nvrm: bar1 is 0m"):
+		return "GPU BAR allocation failed. Enable 'Above 4G Decoding' in BIOS."
+	case strings.Contains(lower, "unsupported gpu architecture"), strings.Contains(lower, "ptxas fatal"):
+		return "llama-server was built for a different GPU architecture. Rebuild with: nollama runtime build"
+	case strings.Contains(lower, "cuda error: out of memory"), strings.Contains(lower, "not enough vram"):
+		return "Not enough VRAM. Try a smaller model or reduce --ctx-size."
+	case strings.Contains(lower, "unknown model architecture"), strings.Contains(lower, "unrecognized model"):
+		return "This model architecture is not supported by your llama-server version. Update with: nollama runtime install"
+	default:
+		return ""
 	}
 }
 

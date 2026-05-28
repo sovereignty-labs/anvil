@@ -3,6 +3,7 @@ package server
 import (
 	"bytes"
 	"crypto/sha256"
+	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
 	"io"
@@ -14,6 +15,7 @@ import (
 	"testing"
 
 	"github.com/sovereignty-labs/nollama/internal/config"
+	"github.com/sovereignty-labs/nollama/internal/model"
 )
 
 func TestHandleModels(t *testing.T) {
@@ -98,7 +100,7 @@ func TestLoadDuplicateModelReturnsConflict(t *testing.T) {
 	// Simulate the model already being loaded by seeding a proxy route.
 	srv.proxy.AddRoute("qwen.gguf", 11500)
 
-	body := bytes.NewBufferString(`{"model":"qwen.gguf"}`)
+	body := bytes.NewBufferString(`{"model":"qwen.gguf","port":45555}`)
 	req := httptest.NewRequest(http.MethodPost, "/api/load", body)
 	rr := httptest.NewRecorder()
 	srv.handleLoad(rr, req)
@@ -170,6 +172,38 @@ func TestHandleLoadBadMethod(t *testing.T) {
 
 	if rr.Code != http.StatusMethodNotAllowed {
 		t.Fatalf("status = %d, want %d", rr.Code, http.StatusMethodNotAllowed)
+	}
+}
+
+func TestHandleLoadDoesNotRegisterRouteUntilReady(t *testing.T) {
+	dir := t.TempDir()
+	writeTestGGUF(t, dir, "qwen.gguf")
+
+	mockScript := filepath.Join(dir, "crash-llama-server")
+	if err := os.WriteFile(mockScript, []byte("#!/bin/sh\necho 'unknown model architecture: qwen3.6' 1>&2\nexit 1\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := config.DefaultConfig()
+	cfg.ModelDir = dir
+	cfg.LlamaServer = mockScript
+	srv := NewServer(cfg, "", nil)
+	srv.procMgr.SetLogDir(dir)
+
+	body := bytes.NewBufferString(`{"model":"qwen.gguf","port":45555}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/load", body)
+	rr := httptest.NewRecorder()
+	srv.handleLoad(rr, req)
+
+	if rr.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want %d", rr.Code, http.StatusInternalServerError)
+	}
+	data, _ := io.ReadAll(rr.Body)
+	if !strings.Contains(string(data), "crashed during model loading") {
+		t.Fatalf("response = %s", data)
+	}
+	if srv.proxy.RouteCount() != 0 {
+		t.Fatalf("expected no route to be registered on load failure, got %d", srv.proxy.RouteCount())
 	}
 }
 
@@ -385,4 +419,70 @@ func TestBuildAutoloadEnvMapsVkDevice(t *testing.T) {
 	if _, ok := flags["vk-device"]; ok {
 		t.Fatal("vk-device flag should be removed before llama-server argv is built")
 	}
+}
+
+func writeTestGGUF(t *testing.T, dir, name string) string {
+	t.Helper()
+
+	path := filepath.Join(dir, name)
+	f, err := os.Create(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+
+	order := binary.LittleEndian
+	if _, err := f.Write([]byte("GGUF")); err != nil {
+		t.Fatal(err)
+	}
+	if err := binary.Write(f, order, uint32(3)); err != nil {
+		t.Fatal(err)
+	}
+	if err := binary.Write(f, order, uint64(0)); err != nil {
+		t.Fatal(err)
+	}
+	if err := binary.Write(f, order, uint64(3)); err != nil {
+		t.Fatal(err)
+	}
+
+	kvs := []struct {
+		key   string
+		typ   uint32
+		value any
+	}{
+		{key: "general.architecture", typ: model.GGUFTypeString, value: "qwen2"},
+		{key: "general.context_length", typ: model.GGUFTypeUint64, value: uint64(4096)},
+		{key: "general.file_type", typ: model.GGUFTypeUint32, value: uint32(15)},
+	}
+
+	for _, kv := range kvs {
+		if err := binary.Write(f, order, uint64(len(kv.key))); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := f.Write([]byte(kv.key)); err != nil {
+			t.Fatal(err)
+		}
+		if err := binary.Write(f, order, kv.typ); err != nil {
+			t.Fatal(err)
+		}
+		switch v := kv.value.(type) {
+		case string:
+			if err := binary.Write(f, order, uint64(len(v))); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := f.Write([]byte(v)); err != nil {
+				t.Fatal(err)
+			}
+		case uint64:
+			if err := binary.Write(f, order, v); err != nil {
+				t.Fatal(err)
+			}
+		case uint32:
+			if err := binary.Write(f, order, v); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+
+	return path
 }

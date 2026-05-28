@@ -1128,6 +1128,12 @@ func TestStartOptsStart_CPU_Device_Flags(t *testing.T) {
 	manager := NewManager(nil)
 	manager.SetLogDir(tmpDir)
 
+	oldWaitForReady := waitForReadyFunc
+	t.Cleanup(func() {
+		waitForReadyFunc = oldWaitForReady
+	})
+	waitForReadyFunc = func(*Manager, int, int, time.Duration) error { return nil }
+
 	mockScript := filepath.Join(tmpDir, "mock-llama-server")
 	err := os.WriteFile(mockScript, []byte("#!/bin/sh\nwhile true; do sleep 1; done\n"), 0o755)
 	if err != nil {
@@ -1366,6 +1372,85 @@ func TestBuildChildEnvAddsExtraEnv(t *testing.T) {
 		}
 	}
 	t.Errorf("expected env to contain %q, got %v", want, env)
+}
+
+func TestDiagnoseCrashPatterns(t *testing.T) {
+	tmpDir := t.TempDir()
+	manager := NewManager(nil)
+	manager.SetLogDir(tmpDir)
+
+	cases := []struct {
+		name       string
+		logContent string
+		wantSubstr string
+	}{
+		{
+			name:       "bar1",
+			logContent: "NVRM: BAR1 is 0M\n",
+			wantSubstr: "Above 4G Decoding",
+		},
+		{
+			name:       "arch",
+			logContent: "ptxas fatal : Unsupported gpu architecture 'sm_120'\n",
+			wantSubstr: "different GPU architecture",
+		},
+		{
+			name:       "oom",
+			logContent: "CUDA error: out of memory\n",
+			wantSubstr: "Not enough VRAM",
+		},
+		{
+			name:       "unsupported-model",
+			logContent: "unknown model architecture: qwen3.6\n",
+			wantSubstr: "not supported by your llama-server version",
+		},
+		{
+			name:       "generic",
+			logContent: "some unrelated crash text\n",
+			wantSubstr: "runtime is too old for this model",
+		},
+	}
+
+	for i, tc := range cases {
+		logPath := filepath.Join(tmpDir, "llama-server-12345.log")
+		if err := os.WriteFile(logPath, []byte(tc.logContent), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		err := manager.diagnoseCrash(12345)
+		if err == nil {
+			t.Fatalf("%s: expected error", tc.name)
+		}
+		if !strings.Contains(err.Error(), tc.wantSubstr) {
+			t.Fatalf("%s[%d]: error %q does not contain %q", tc.name, i, err.Error(), tc.wantSubstr)
+		}
+	}
+}
+
+func TestWaitForReadyDetectsImmediateCrash(t *testing.T) {
+	tmpDir := t.TempDir()
+	manager := NewManager(nil)
+	manager.SetLogDir(tmpDir)
+
+	mockScript := filepath.Join(tmpDir, "crash-llama-server")
+	err := os.WriteFile(mockScript, []byte("#!/bin/sh\necho 'ptxas fatal : Unsupported gpu architecture' 1>&2\nexit 1\n"), 0o755)
+	if err != nil {
+		t.Fatalf("failed to create mock script: %v", err)
+	}
+
+	result := makeTestResult(t, 19945, mockScript)
+	proc, err := manager.Start(result, "test-model.gguf", nil)
+	if err != nil {
+		t.Fatalf("Start() error: %v", err)
+	}
+	<-proc.done
+
+	err = manager.waitForReady(proc.Port, proc.PID, 200*time.Millisecond)
+	if err == nil {
+		t.Fatal("expected readiness check to fail for crashed process")
+	}
+	if !strings.Contains(err.Error(), "different GPU architecture") {
+		t.Fatalf("waitForReady error = %v, want GPU architecture guidance", err)
+	}
 }
 
 func ldEntries(env []string) []string {

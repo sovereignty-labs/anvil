@@ -106,10 +106,11 @@ func (p *Proxy) AddRoute(modelFilename string, port int) {
 	p.AddRouteWithAlias(modelFilename, port, "")
 }
 
-// AddRouteWithAlias registers a model → backend mapping. When alias is non-empty
-// the proxy keys the route on the lowercased alias; otherwise on the filename
-// stem. The same model file may be registered multiple times with different
-// aliases — each becomes an independent route.
+// AddRouteWithAlias registers a model → backend mapping. Callers should only
+// invoke this after the backing llama-server has passed its readiness check.
+// When alias is non-empty the proxy keys the route on the lowercased alias;
+// otherwise on the filename stem. The same model file may be registered
+// multiple times with different aliases — each becomes an independent route.
 func (p *Proxy) AddRouteWithAlias(modelFilename string, port int, alias string) {
 	alias = strings.TrimSpace(alias)
 	key := routeKeyFor(modelFilename, alias)
