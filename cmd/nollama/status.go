@@ -6,6 +6,7 @@ import (
 	"net/url"
 	"os"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"text/tabwriter"
@@ -191,9 +192,9 @@ func modelGPUName(node federation.StatusNode, gpu string) string {
 	if gpu == "" || gpu == "cpu" {
 		return "cpu"
 	}
-	if idx, ok := parseCUDAIndex(gpu); ok {
+	if idx, backend, ok := parseDeviceIndex(gpu); ok {
 		for _, g := range node.GPUs {
-			if g.Index == idx && g.Name != "" {
+			if g.Index == idx && backendMatches(g.Backend, backend) && g.Name != "" {
 				return g.Name
 			}
 		}
@@ -205,9 +206,9 @@ func modelVRAM(node federation.StatusNode, gpu string) string {
 	if gpu == "" || gpu == "cpu" {
 		return "—"
 	}
-	if idx, ok := parseCUDAIndex(gpu); ok {
+	if idx, backend, ok := parseDeviceIndex(gpu); ok {
 		for _, g := range node.GPUs {
-			if g.Index == idx {
+			if g.Index == idx && backendMatches(g.Backend, backend) {
 				used := g.VRAMTotalMB
 				if g.VRAMTotalMB > g.VRAMFreeMB {
 					used = g.VRAMTotalMB - g.VRAMFreeMB
@@ -286,13 +287,26 @@ func normalizeDialAddress(bind string) string {
 	return net.JoinHostPort(host, port)
 }
 
-func parseCUDAIndex(gpu string) (int, bool) {
-	if !strings.HasPrefix(gpu, "cuda:") {
-		return 0, false
+func parseDeviceIndex(gpu string) (int, string, bool) {
+	if gpu == "" || gpu == "cpu" {
+		return 0, "", false
 	}
-	var idx int
-	if _, err := fmt.Sscanf(gpu, "cuda:%d", &idx); err != nil {
-		return 0, false
+	backend, index, ok := strings.Cut(gpu, ":")
+	if !ok || index == "" {
+		return 0, "", false
 	}
-	return idx, true
+	switch backend {
+	case "cuda", "rocm", "vulkan":
+	default:
+		return 0, "", false
+	}
+	idx, err := strconv.Atoi(index)
+	if err != nil || idx < 0 {
+		return 0, "", false
+	}
+	return idx, backend, true
+}
+
+func backendMatches(nodeBackend, requestedBackend string) bool {
+	return nodeBackend == "" || nodeBackend == requestedBackend
 }
