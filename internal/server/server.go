@@ -265,15 +265,30 @@ func (s *Server) autoloadModels(hw *hardware.Inventory) {
 // Returns the port the process is listening on.
 func (s *Server) loadModel(entry config.AutoloadEntry, hw *hardware.Inventory) (int, error) {
 	modelPath := s.cfg.ModelPath(entry.Model)
-	_, backend, err := s.resolveLlamaServerPathAndBackend()
-	if err != nil {
-		return 0, err
+
+	var (
+		llamaServer string
+		backend     runtimemgr.BuildBackend
+		err         error
+	)
+	if strings.TrimSpace(entry.Runtime) != "" {
+		mgr := runtimemgr.NewManager()
+		llamaServer, err = mgr.ResolveNamed(entry.Runtime)
+		if err != nil {
+			return 0, fmt.Errorf("resolve runtime %q: %w", entry.Runtime, err)
+		}
+		backend = mgr.RuntimeBackend(entry.Runtime)
+	} else {
+		llamaServer, backend, err = s.resolveLlamaServerPathAndBackend()
+		if err != nil {
+			return 0, err
+		}
 	}
 
 	// Build the StartOpts from the autoload entry
 	opts := process.StartOpts{
 		ModelPath:   modelPath,
-		LlamaServer: s.cfg.LlamaServer,
+		LlamaServer: llamaServer,
 		Backend:     backend,
 		PinnedPort:  entry.Port,
 	}

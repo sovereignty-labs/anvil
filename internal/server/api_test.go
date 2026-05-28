@@ -6,10 +6,12 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -204,6 +206,68 @@ func TestHandleLoadDoesNotRegisterRouteUntilReady(t *testing.T) {
 	}
 	if srv.proxy.RouteCount() != 0 {
 		t.Fatalf("expected no route to be registered on load failure, got %d", srv.proxy.RouteCount())
+	}
+}
+
+func TestLoadModelUsesEntryRuntimeBackendAndBinary(t *testing.T) {
+	root := t.TempDir()
+	xdgConfigHome := filepath.Join(root, "config")
+	runtimesDir := filepath.Join(root, "runtimes")
+	modelDir := filepath.Join(root, "models")
+
+	if err := os.MkdirAll(filepath.Join(xdgConfigHome, "nollama"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(xdgConfigHome, "nollama", "config.yaml"), []byte("runtimes_dir: "+runtimesDir+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("XDG_CONFIG_HOME", xdgConfigHome)
+
+	rocmDir := filepath.Join(runtimesDir, "llama-rocm")
+	cudaDir := filepath.Join(runtimesDir, "llama-b9375")
+	for _, dir := range []string{rocmDir, cudaDir, modelDir} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	buildTestRuntimeBinary(t, rocmDir, "rocm")
+	buildTestRuntimeBinary(t, cudaDir, "cuda")
+	if err := os.WriteFile(filepath.Join(rocmDir, "backend"), []byte("rocm\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(cudaDir, "backend"), []byte("cuda\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	writeTestGGUF(t, modelDir, "qwen.gguf")
+
+	cfg := config.DefaultConfig()
+	cfg.ModelDir = modelDir
+	cfg.LlamaServer = filepath.Join(cudaDir, "llama-server")
+	srv := NewServer(cfg, "", nil)
+	srv.procMgr.SetLogDir(root)
+
+	gpu := 0
+	entry := config.AutoloadEntry{
+		Model:   "qwen.gguf",
+		Runtime: "llama-rocm",
+		GPU:     &gpu,
+	}
+
+	port, err := srv.loadModel(entry, nil)
+	if err != nil {
+		t.Fatalf("loadModel() error: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = srv.procMgr.StopByPort(port)
+	})
+
+	proc := srv.procMgr.GetByPort(port)
+	if proc == nil {
+		t.Fatal("expected running process to be tracked")
+	}
+	if proc.GPUIndex != "rocm:0" {
+		t.Fatalf("GPUIndex = %q, want rocm:0", proc.GPUIndex)
 	}
 }
 
@@ -485,4 +549,50 @@ func writeTestGGUF(t *testing.T, dir, name string) string {
 	}
 
 	return path
+}
+
+func buildTestRuntimeBinary(t *testing.T, dir, label string) string {
+	t.Helper()
+
+	source := filepath.Join(dir, "mock_runtime.go")
+	binary := filepath.Join(dir, "llama-server")
+	code := fmt.Sprintf(`package main
+
+import (
+	"fmt"
+	"net/http"
+	"os"
+	"strconv"
+)
+
+func main() {
+	label := %q
+	fmt.Fprintf(os.Stderr, "runtime=%%s\n", label)
+	port := 11434
+	for i := 1; i+1 < len(os.Args); i++ {
+		if os.Args[i] == "--port" {
+			if parsed, err := strconv.Atoi(os.Args[i+1]); err == nil {
+				port = parsed
+			}
+		}
+	}
+	http.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
+		_, _ = fmt.Fprintln(w, "ok")
+	})
+	_ = http.ListenAndServe("127.0.0.1:"+strconv.Itoa(port), nil)
+}
+`, label)
+	if err := os.WriteFile(source, []byte(code), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command("go", "build", "-o", binary, source)
+	cmd.Dir = dir
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("build test runtime %s: %v\n%s", label, err, out)
+	}
+	if err := os.Remove(source); err != nil {
+		t.Fatal(err)
+	}
+	return binary
 }
