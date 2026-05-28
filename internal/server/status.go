@@ -33,6 +33,7 @@ type statusNode struct {
 type statusGPU struct {
 	Index       int    `json:"index"`
 	Name        string `json:"name"`
+	Backend     string `json:"backend,omitempty"`
 	VRAMTotalMB uint64 `json:"vram_total_mb"`
 	VRAMFreeMB  uint64 `json:"vram_free_mb"`
 }
@@ -71,6 +72,16 @@ func (s *Server) buildStatusResponse() statusResponse {
 			resp.Node.GPUs = append(resp.Node.GPUs, statusGPU{
 				Index:       gpu.Index,
 				Name:        gpu.DisplayName(),
+				Backend:     "cuda",
+				VRAMTotalMB: gpu.VRAMTotal,
+				VRAMFreeMB:  gpu.VRAMFree,
+			})
+		}
+		for _, gpu := range hw.ROCmGPUs {
+			resp.Node.GPUs = append(resp.Node.GPUs, statusGPU{
+				Index:       gpu.Index,
+				Name:        gpu.Name,
+				Backend:     "rocm",
 				VRAMTotalMB: gpu.VRAMTotal,
 				VRAMFreeMB:  gpu.VRAMFree,
 			})

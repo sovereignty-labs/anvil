@@ -47,6 +47,7 @@ type StatusNode struct {
 type StatusGPU struct {
 	Index       int    `json:"index"`
 	Name        string `json:"name"`
+	Backend     string `json:"backend,omitempty"`
 	VRAMTotalMB uint64 `json:"vram_total_mb"`
 	VRAMFreeMB  uint64 `json:"vram_free_mb"`
 }

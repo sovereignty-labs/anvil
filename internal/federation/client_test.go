@@ -26,6 +26,7 @@ func TestClientStatus(t *testing.T) {
 				GPUs: []StatusGPU{{
 					Index:       0,
 					Name:        "RTX 3090 24GB",
+					Backend:     "cuda",
 					VRAMTotalMB: 24576,
 					VRAMFreeMB:  16384,
 				}},
@@ -49,6 +50,9 @@ func TestClientStatus(t *testing.T) {
 	}
 	if len(resp.Node.GPUs) != 1 || resp.Node.GPUs[0].Name != "RTX 3090 24GB" {
 		t.Fatalf("unexpected node GPU payload: %+v", resp.Node.GPUs)
+	}
+	if resp.Node.GPUs[0].Backend != "cuda" {
+		t.Fatalf("unexpected backend: %+v", resp.Node.GPUs[0])
 	}
 }
 
