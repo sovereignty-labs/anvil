@@ -11,6 +11,7 @@ import (
 )
 
 var runtimeInstallVersion string
+var runtimeInstallNoBuild bool
 var (
 	runtimeBuildRepo    string
 	runtimeBuildBranch  string
@@ -21,6 +22,7 @@ var (
 
 func init() {
 	runtimeInstallCmd.Flags().StringVar(&runtimeInstallVersion, "version", "", "Install a specific llama.cpp release tag")
+	runtimeInstallCmd.Flags().BoolVar(&runtimeInstallNoBuild, "no-build", false, "Download only; do not auto-build from source when no GPU binary is available")
 
 	runtimeBuildCmd.Flags().StringVar(&runtimeBuildRepo, "repo", "", "Git repository to clone (default: ggml-org/llama.cpp)")
 	runtimeBuildCmd.Flags().StringVar(&runtimeBuildBranch, "branch", "", "Branch or tag to checkout")
@@ -34,7 +36,7 @@ func init() {
 
 func runRuntimeInstall(_ *cobra.Command, _ []string) error {
 	mgr := runtimemgr.NewManager()
-	_, err := mgr.Install(runtimeInstallVersion)
+	_, err := mgr.Install(runtimeInstallVersion, runtimeInstallNoBuild)
 	return err
 }
 

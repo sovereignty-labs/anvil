@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	stdruntime "runtime"
 	"strings"
 )
 
@@ -55,6 +56,251 @@ func lookPathOrEmpty(name string) string {
 		return ""
 	}
 	return p
+}
+
+// autoBuildBackendForPlatform picks the backend that should be built from
+// source for the detected platform.
+func autoBuildBackendForPlatform(platform Platform) BuildBackend {
+	switch {
+	case platform.CUDA != "":
+		return BuildBackendCUDA
+	case platform.ROCm != "":
+		return BuildBackendROCm
+	default:
+		return BuildBackendCPU
+	}
+}
+
+func backendDisplayName(backend BuildBackend) string {
+	switch backend {
+	case BuildBackendCUDA:
+		return "CUDA"
+	case BuildBackendROCm:
+		return "ROCm"
+	case BuildBackendVulkan:
+		return "Vulkan"
+	case BuildBackendCPU:
+		return "CPU"
+	default:
+		return strings.ToUpper(string(backend))
+	}
+}
+
+func findCXXCompiler() string {
+	for _, name := range []string{"c++", "g++", "clang++"} {
+		if path := lookPathOrEmpty(name); path != "" {
+			return path
+		}
+	}
+	return ""
+}
+
+func findCUDAToolkit() (string, string) {
+	if nvcc := lookPathOrEmpty("nvcc"); nvcc != "" {
+		return nvcc, filepath.Dir(filepath.Dir(nvcc))
+	}
+
+	candidates := []string{"/usr/local/cuda/bin/nvcc"}
+	if matches, err := filepath.Glob("/usr/local/cuda-*/bin/nvcc"); err == nil {
+		candidates = append(candidates, matches...)
+	}
+	for _, nvcc := range candidates {
+		if info, err := os.Stat(nvcc); err == nil && !info.IsDir() {
+			return nvcc, filepath.Dir(filepath.Dir(nvcc))
+		}
+	}
+	return "", ""
+}
+
+func checkAutoBuildPrereqs(backend BuildBackend) (string, error) {
+	if lookPathOrEmpty("git") == "" {
+		return "", fmt.Errorf("Error: git is required to build from source. Install with: sudo apt install git")
+	}
+	if lookPathOrEmpty("cmake") == "" {
+		return "", fmt.Errorf("Error: cmake is required to build from source. Install with: sudo apt install cmake")
+	}
+	if findCXXCompiler() == "" {
+		return "", fmt.Errorf("Error: a C++ compiler is required. Install with: sudo apt install build-essential")
+	}
+
+	switch backend {
+	case BuildBackendCUDA:
+		if _, root := findCUDAToolkit(); root != "" {
+			return root, nil
+		}
+		return "", fmt.Errorf("Error: CUDA toolkit is required. Install with: sudo apt install cuda-toolkit")
+	case BuildBackendROCm:
+		if lookPathOrEmpty("hipcc") == "" {
+			return "", fmt.Errorf("Error: ROCm toolkit is required. Install the ROCm HIP toolchain so hipcc is available.")
+		}
+		return "", nil
+	default:
+		return "", nil
+	}
+}
+
+func autoBuildCMakeArgs(backend BuildBackend, toolkitRoot string) []string {
+	args := []string{
+		"-B", "build",
+		"-DCMAKE_BUILD_TYPE=Release",
+		"-DBUILD_SHARED_LIBS=ON",
+		"-DLLAMA_BUILD_TESTS=OFF",
+		"-DLLAMA_BUILD_EXAMPLES=OFF",
+		"-DLLAMA_BUILD_SERVER=ON",
+	}
+
+	switch backend {
+	case BuildBackendCUDA:
+		args = append(args, "-DGGML_CUDA=ON")
+		if toolkitRoot != "" {
+			args = append(args, "-DCUDAToolkit_ROOT="+toolkitRoot)
+		}
+	case BuildBackendROCm:
+		args = append(args, "-DGGML_HIP=ON", "-DGPU_TARGETS="+detectROCmGPUTargets())
+	case BuildBackendVulkan:
+		args = append(args, "-DGGML_VULKAN=ON")
+	}
+
+	return args
+}
+
+func runBuildCmdEnv(dir string, env []string, name string, args ...string) error {
+	cmd := exec.Command(name, args...)
+	cmd.Dir = dir
+	cmd.Stdout = os.Stderr
+	cmd.Stderr = os.Stderr
+	if env != nil {
+		cmd.Env = env
+	}
+	return cmd.Run()
+}
+
+func buildEnvWithCompiler(compiler string) []string {
+	env := os.Environ()
+	if compiler != "" {
+		env = append(env, "CXX="+compiler)
+	}
+	return env
+}
+
+func buildJobs() string {
+	return fmt.Sprintf("%d", stdruntime.NumCPU())
+}
+
+// AutoBuild builds llama-server from source using the backend detected on the
+// current machine.
+func (m *Manager) AutoBuild(name string) error {
+	backend := autoBuildBackendForPlatform(DetectPlatform())
+	_, err := m.autoBuild(name, "", backend)
+	return err
+}
+
+func (m *Manager) autoBuild(name, ref string, backend BuildBackend) (*RuntimeInfo, error) {
+	if err := m.ensureDir(); err != nil {
+		return nil, fmt.Errorf("prepare runtimes dir: %w", err)
+	}
+
+	if err := validateRuntimeName(name); err != nil {
+		return nil, err
+	}
+
+	toolkitRoot, err := checkAutoBuildPrereqs(backend)
+	if err != nil {
+		return nil, err
+	}
+
+	srcDir, err := os.MkdirTemp("", "nollama-build-")
+	if err != nil {
+		return nil, fmt.Errorf("create build temp dir: %w", err)
+	}
+	defer os.RemoveAll(srcDir)
+
+	repo := defaultBuildRepo
+	cloneArgs := []string{"clone", "--depth", "1"}
+	if b := strings.TrimSpace(ref); b != "" {
+		cloneArgs = append(cloneArgs, "--branch", b, "--single-branch")
+	}
+	cloneArgs = append(cloneArgs, repo, srcDir)
+
+	compiler := findCXXCompiler()
+
+	fmt.Fprintf(os.Stderr, "\nCloning %s...\n", repo)
+	if err := runBuildCmdEnv(srcDir, buildEnvWithCompiler(compiler), "git", cloneArgs...); err != nil {
+		return nil, fmt.Errorf("git clone: %w", err)
+	}
+
+	cmakeArgs := autoBuildCMakeArgs(backend, toolkitRoot)
+	fmt.Fprintf(os.Stderr, "\nConfiguring: cmake %s\n", strings.Join(cmakeArgs, " "))
+	if err := runBuildCmdEnv(srcDir, buildEnvWithCompiler(compiler), "cmake", cmakeArgs...); err != nil {
+		return nil, fmt.Errorf("cmake configure: %w", err)
+	}
+
+	jobs := buildJobs()
+	fmt.Fprintf(os.Stderr, "\nBuilding (-j%s)...\n", jobs)
+	if err := runBuildCmdEnv(srcDir, buildEnvWithCompiler(compiler), "cmake", "--build", "build", "--config", "Release", "-j", jobs, "--target", "llama-server"); err != nil {
+		return nil, fmt.Errorf("cmake build: %w", err)
+	}
+
+	binarySrc, libs, err := findBuildArtifacts(filepath.Join(srcDir, "build"))
+	if err != nil {
+		return nil, err
+	}
+
+	finalDir, err := m.runtimeDir(name)
+	if err != nil {
+		return nil, err
+	}
+	workDir, err := os.MkdirTemp(m.runtimesDir, "."+name+".")
+	if err != nil {
+		return nil, fmt.Errorf("create temp runtime dir: %w", err)
+	}
+	cleanup := true
+	defer func() {
+		if cleanup {
+			_ = os.RemoveAll(workDir)
+		}
+	}()
+
+	if err := copyFile(binarySrc, filepath.Join(workDir, runtimeBinaryName())); err != nil {
+		return nil, err
+	}
+	for _, lib := range libs {
+		if err := copyFile(lib, filepath.Join(workDir, filepath.Base(lib))); err != nil {
+			return nil, err
+		}
+	}
+	if err := chmodRuntimeArtifacts(workDir); err != nil {
+		return nil, err
+	}
+	if err := writeSourceMarker(workDir, "build"); err != nil {
+		return nil, err
+	}
+	if err := writeBackendMarker(workDir, backend); err != nil {
+		return nil, err
+	}
+
+	if err := os.RemoveAll(finalDir); err != nil {
+		return nil, fmt.Errorf("remove existing runtime %s: %w", finalDir, err)
+	}
+	if err := os.Rename(workDir, finalDir); err != nil {
+		return nil, fmt.Errorf("finalize build runtime: %w", err)
+	}
+	cleanup = false
+
+	if err := m.Use(name); err != nil {
+		return nil, err
+	}
+
+	info := RuntimeInfo{
+		Name:    name,
+		Path:    filepath.Join(finalDir, runtimeBinaryName()),
+		Version: "",
+		Source:  "build",
+		Active:  true,
+	}
+	fmt.Fprintf(os.Stderr, "Installed: %s\n", info.Path)
+	fmt.Fprintf(os.Stderr, "Active runtime: %s ✓\n", info.Name)
+	return &info, nil
 }
 
 // printBuildTools prints the resolved toolchain to stderr.

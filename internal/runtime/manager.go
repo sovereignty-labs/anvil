@@ -99,8 +99,14 @@ func homeRuntimesDir() string {
 }
 
 var (
-	homeUnsetWarnOnce sync.Once
-	stderrWriter      io.Writer = os.Stderr // overridable in tests
+	homeUnsetWarnOnce    sync.Once
+	stderrWriter         io.Writer = os.Stderr // overridable in tests
+	detectPlatformFn               = DetectPlatform
+	fetchLatestReleaseFn           = FetchLatestRelease
+	fetchReleaseFn                 = FetchRelease
+	autoBuildRuntimeFn             = func(m *Manager, name, ref string, backend BuildBackend) (*RuntimeInfo, error) {
+		return m.autoBuild(name, ref, backend)
+	}
 )
 
 // warnHomeUnsetOnce emits a single stderr line when HOME is unset, so ops
@@ -149,16 +155,19 @@ func (m *Manager) runtimeBinaryPath(name string) (string, error) {
 	return filepath.Join(dir, runtimeBinaryName()), nil
 }
 
-// Install downloads and installs a pre-built llama-server binary.
-func (m *Manager) Install(version string) (*RuntimeInfo, error) {
+// Install downloads a pre-built llama-server binary, or auto-builds from
+// source when the release does not provide a matching GPU binary.
+func (m *Manager) Install(version string, noBuild bool) (*RuntimeInfo, error) {
 	if err := m.ensureDir(); err != nil {
 		return nil, fmt.Errorf("prepare runtimes dir: %w", err)
 	}
 
-	platform := DetectPlatform()
+	platform := detectPlatformFn()
 	fmt.Fprintf(os.Stderr, "Detecting platform... %s %s", prettyOS(platform.OS), prettyArch(platform.Arch))
 	if platform.CUDA != "" {
 		fmt.Fprint(os.Stderr, ", NVIDIA GPU (CUDA available)\n")
+	} else if platform.ROCm != "" {
+		fmt.Fprint(os.Stderr, ", AMD GPU (ROCm available)\n")
 	} else {
 		fmt.Fprint(os.Stderr, ", CPU-only\n")
 	}
@@ -167,10 +176,10 @@ func (m *Manager) Install(version string) (*RuntimeInfo, error) {
 	var err error
 	if version == "" {
 		fmt.Fprintln(os.Stderr, "Fetching latest llama.cpp release...")
-		release, err = FetchLatestRelease()
+		release, err = fetchLatestReleaseFn()
 	} else {
 		fmt.Fprintf(os.Stderr, "Fetching llama.cpp release %s...\n", version)
-		release, err = FetchRelease(version)
+		release, err = fetchReleaseFn(version)
 	}
 	if err != nil {
 		return nil, err
@@ -185,6 +194,15 @@ func (m *Manager) Install(version string) (*RuntimeInfo, error) {
 	fmt.Fprintf(os.Stderr, "Selected: %s (%s)\n", asset.Name, humanBytes(asset.Size))
 
 	runtimeName := runtimeNameForTag(release.TagName)
+	if backend, needsBuild := buildBackendForInstall(platform, asset.Name); needsBuild {
+		if noBuild {
+			warnNoPrebuiltBinary(backend)
+		} else {
+			fmt.Fprintf(os.Stderr, "No pre-built %s binary available for Linux. Building from source with %s support...\n", backendDisplayName(backend), backendDisplayName(backend))
+			return autoBuildRuntimeFn(m, runtimeName, release.TagName, backend)
+		}
+	}
+
 	finalDir, err := m.runtimeDir(runtimeName)
 	if err != nil {
 		return nil, err
@@ -248,6 +266,13 @@ func (m *Manager) Install(version string) (*RuntimeInfo, error) {
 	fmt.Fprintf(os.Stderr, "Installed: %s\n", info.Path)
 	fmt.Fprintf(os.Stderr, "Active runtime: %s ✓\n", info.Name)
 	return &info, nil
+}
+
+func warnNoPrebuiltBinary(backend BuildBackend) {
+	fmt.Fprintf(os.Stderr, "Warning: %s detected but no %s build available for this platform in this release.\n", backendDisplayName(backend), backendDisplayName(backend))
+	fmt.Fprintln(os.Stderr, "  The downloaded runtime is CPU-only.")
+	fmt.Fprintln(os.Stderr, "  For GPU acceleration, run: nollama runtime build")
+	fmt.Fprintf(os.Stderr, "  Or compile llama.cpp with %s and use: nollama runtime add <name> /path/to/llama-server\n", backendDisplayName(backend))
 }
 
 // BuildOpts configures a from-source runtime build.
