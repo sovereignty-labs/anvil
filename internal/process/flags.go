@@ -4,6 +4,7 @@ package process
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/sovereignty-labs/nollama/internal/hardware"
 	"github.com/sovereignty-labs/nollama/internal/model"
@@ -22,6 +23,7 @@ type Result struct {
 	CPUThreads     int      // number of CPU threads (non-zero only when CPU fallback)
 	GPUIndex       int      // GPU index used (-1 for CPU fallback)
 	Port           int      // llama-server HTTP port (11434 + modelIndex)
+	ReadyTimeout   time.Duration
 }
 
 // EnsureHostFlag injects --host 0.0.0.0 into flags when no --host is already

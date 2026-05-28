@@ -369,6 +369,7 @@ func (s *Server) handleLoad(w http.ResponseWriter, r *http.Request) {
 	if req.Port > 0 {
 		process.OverrideResultPort(result, req.Port)
 	}
+	result.ReadyTimeout = 60 * time.Second
 
 	passthrough := config.FlagsMapToSlice(req.Flags)
 	if alias := strings.TrimSpace(req.Alias); alias != "" {
@@ -400,7 +401,7 @@ func (s *Server) handleLoad(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	procInfo.ModelPath = modelPath
-	s.proxy.AddRouteWithAlias(req.Model, procInfo.Port, req.Alias)
+	s.registerLoadedRoute(req.Model, procInfo.Port, req.Alias)
 
 	writeJSON(w, http.StatusOK, loadResponse{
 		Status: "ok",
@@ -506,6 +507,10 @@ func (s *Server) nextModelIndex() int {
 		port++
 	}
 	return port - 11434
+}
+
+func (s *Server) registerLoadedRoute(model string, port int, alias string) {
+	s.proxy.AddRouteWithAlias(model, port, alias)
 }
 
 func parseBindPort(bind string) int {
