@@ -1,0 +1,47 @@
+# nollama config - Multi-GPU example
+#
+# Hardware: 2x NVIDIA GPUs (24GB + 16GB)
+#
+# Deploy:
+#   cp multi-gpu.yaml /etc/nollama/config.yaml
+#   nollama serve --config /etc/nollama/config.yaml
+
+model_dir: /mnt/models
+
+bind: 0.0.0.0:11434
+
+remotes:
+  node2:
+    url: http://node2.example.internal:11434
+
+autoload:
+  - model: Qwen3.6-35B-A3B-UD-IQ3_S.gguf
+    alias: main
+    gpu: 0
+    flags:
+      ctx-size: 131072
+      parallel: 4
+      flash-attn: "on"
+      cache-type-k: q8_0
+      cache-type-v: q4_0
+
+  - model: Qwen3.6-35B-A3B-UD-IQ3_S.gguf
+    alias: fast
+    gpu: 1
+    flags:
+      ctx-size: 65536
+      parallel: 2
+      flash-attn: "on"
+
+aliases:
+  advisor: Qwen3.6-35B-A3B-UD-IQ3_S
+
+defaults:
+  flash-attn: "on"
+  no-warmup: true
+  jinja: true
+
+mcp:
+  enabled: true
+  transport: sse
+  bind: 0.0.0.0:11436

@@ -24,7 +24,7 @@ case "$OS" in
 esac
 
 ASSET="${BINARY}-${OS}-${ARCH}"
-URL="https://github.com/${REPO}/releases/download/latest/${ASSET}"
+URL="https://github.com/${REPO}/releases/latest/download/${ASSET}"
 
 # Determine install directory
 if [ "$(id -u)" -eq 0 ]; then
