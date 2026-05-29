@@ -1,0 +1,95 @@
+name: Build and Push
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+env:
+  REGISTRY_USER: ${{ secrets.REGISTRY_USER }}
+  REGISTRY_PASSWORD: ${{ secrets.REGISTRY_PASSWORD }}
+  DOCKER_HOST: tcp://localhost:2375
+  REGISTRY: git.hirdforge.com/kit/nollama
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Install tools
+        run: apk add --no-cache docker-cli curl jq
+      - name: Trust CA for Docker
+        run: |
+          update-ca-certificates 2>/dev/null || true
+          mkdir -p /etc/docker/certs.d/git.hirdforge.com
+          cp /usr/local/share/ca-certificates/hirdforge-ca.crt /etc/docker/certs.d/git.hirdforge.com/ca.crt
+      - name: Registry login
+        run: echo $REGISTRY_PASSWORD | docker login git.hirdforge.com -u $REGISTRY_USER --password-stdin
+      - name: Clone repository
+        run: rm -rf /src && git clone http://gitea-http.gitea.svc.cluster.local:3000/kit/nollama.git /src
+      - name: Build and push
+        run: |
+          cd /src
+          SHA_SHORT=$(git rev-parse --short HEAD)
+          # Tag pushes (GITEA_REF_TYPE=tag) -> VERSION is the tag; else "dev".
+          if [ "${GITEA_REF_TYPE}" = "tag" ] && [ -n "${GITEA_REF_NAME}" ]; then
+            VERSION="${GITEA_REF_NAME}"
+          else
+            VERSION="dev"
+          fi
+          docker build \
+            --build-arg VERSION="${VERSION}" \
+            --build-arg COMMIT="${SHA_SHORT}" \
+            --build-arg DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            -t $REGISTRY/nollama:latest \
+            -t $REGISTRY/nollama:sha-${SHA_SHORT} .
+          docker push $REGISTRY/nollama:latest
+          docker push $REGISTRY/nollama:sha-${SHA_SHORT}
+      - name: Publish binary
+        run: |
+          cd /src
+          SHA_SHORT=$(git rev-parse --short HEAD)
+          GITEA_API=http://gitea-http.gitea.svc.cluster.local:3000/api/v1
+          AUTH="${REGISTRY_USER}:${REGISTRY_PASSWORD}"
+
+          docker create --name tmp $REGISTRY/nollama:latest
+          docker cp tmp:/usr/local/bin/nollama /tmp/nollama
+          docker rm tmp
+
+          # Always update rolling "latest" pre-release
+          RELEASE_ID=$(curl -s -u "$AUTH" "$GITEA_API/repos/kit/nollama/releases/tags/latest" | jq -r '.id // empty')
+          if [ -n "$RELEASE_ID" ]; then
+            curl -s -X DELETE -u "$AUTH" "$GITEA_API/repos/kit/nollama/releases/$RELEASE_ID"
+            curl -s -X DELETE -u "$AUTH" "$GITEA_API/repos/kit/nollama/tags/latest"
+          fi
+
+          RELEASE_RESPONSE=$(curl -s -X POST -u "$AUTH" -H "Content-Type: application/json" \
+            -d "{\"tag_name\":\"latest\",\"name\":\"Latest Build (${SHA_SHORT})\",\"body\":\"Automated build from main at ${SHA_SHORT}\",\"prerelease\":true,\"target_commitish\":\"main\"}" \
+            "$GITEA_API/repos/kit/nollama/releases")
+          RELEASE_ID=$(echo "$RELEASE_RESPONSE" | jq -r '.id')
+
+          if [ "$RELEASE_ID" = "null" ] || [ -z "$RELEASE_ID" ]; then
+            echo "ERROR: Release creation failed"
+            echo "$RELEASE_RESPONSE"
+            exit 1
+          fi
+
+          curl -s -X POST -u "$AUTH" \
+            -F "attachment=@/tmp/nollama" \
+            "$GITEA_API/repos/kit/nollama/releases/${RELEASE_ID}/assets?name=nollama-linux-amd64"
+
+          echo "Published nollama binary at ${SHA_SHORT}"
+
+          # If this is a tag push, also create a proper tagged release
+          if [ "${GITEA_REF_TYPE}" = "tag" ] && [ -n "${GITEA_REF_NAME}" ]; then
+            TAG_RELEASE_RESPONSE=$(curl -s -X POST -u "$AUTH" -H "Content-Type: application/json" \
+              -d "{\"tag_name\":\"${GITEA_REF_NAME}\",\"name\":\"nollama ${GITEA_REF_NAME}\",\"body\":\"Release ${GITEA_REF_NAME}\",\"prerelease\":false,\"target_commitish\":\"main\"}" \
+              "$GITEA_API/repos/kit/nollama/releases")
+            TAG_RELEASE_ID=$(echo "$TAG_RELEASE_RESPONSE" | jq -r '.id')
+
+            if [ "$TAG_RELEASE_ID" != "null" ] && [ -n "$TAG_RELEASE_ID" ]; then
+              curl -s -X POST -u "$AUTH" \
+                -F "attachment=@/tmp/nollama" \
+                "$GITEA_API/repos/kit/nollama/releases/${TAG_RELEASE_ID}/assets?name=nollama-linux-amd64"
+              echo "Published tagged release ${GITEA_REF_NAME}"
+            else
+              echo "WARNING: Tagged release creation failed"
+              echo "$TAG_RELEASE_RESPONSE"
+            fi
+          fi
