@@ -1,6 +1,6 @@
 [Unit]
 Description=nollama — transparent llama-server manager
-Documentation=https://git.hirdforge.com/kit/nollama
+Documentation=https://github.com/sovereignty-labs/nollama
 After=network.target
 
 [Service]

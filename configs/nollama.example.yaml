@@ -24,12 +24,12 @@ model_dir: /mnt/models/gguf
 # Listen address for the unified API endpoint
 bind: 0.0.0.0:11434
 
-# Remotes (federation — Phase 2)
-# remotes:
-#   gpu-host:
-#     url: http://gpu-host.example.internal:11434
-#   inference-host:
-#     url: http://inference-host.example.internal:11434
+# Remotes (federation)
+remotes:
+  gpu-host:
+    url: http://gpu-host.example.internal:11434
+#  inference-host:
+#    url: http://inference-host.example.internal:11434
 
 # Models to auto-load on startup
 autoload:
@@ -82,11 +82,8 @@ defaults:
 #     name: "RTX 5060 Ti"
 #     vram: 16384
 
-# Management API (Phase 2 — not yet implemented)
-# management:
-#   bind: 127.0.0.1:11435
-
-# MCP server (Phase 2 — not yet implemented)
+# MCP server for agent-driven fleet management
 # mcp:
 #   enabled: true
-#   transport: stdio
+#   transport: sse
+#   bind: 0.0.0.0:11436
