@@ -11,6 +11,7 @@ import (
 )
 
 var runtimeInstallVersion string
+var runtimeInstallNoPrebuilt bool
 var runtimeInstallNoBuild bool
 var (
 	runtimeBuildRepo    string
@@ -22,6 +23,7 @@ var (
 
 func init() {
 	runtimeInstallCmd.Flags().StringVar(&runtimeInstallVersion, "version", "", "Install a specific llama.cpp release tag")
+	runtimeInstallCmd.Flags().BoolVar(&runtimeInstallNoPrebuilt, "no-prebuilt", false, "Skip sovereignty-labs pre-built runtimes and fall back to ggml.org or source builds")
 	runtimeInstallCmd.Flags().BoolVar(&runtimeInstallNoBuild, "no-build", false, "Download only; do not auto-build from source when no GPU binary is available")
 
 	runtimeBuildCmd.Flags().StringVar(&runtimeBuildRepo, "repo", "", "Git repository to clone (default: ggml-org/llama.cpp)")
@@ -36,7 +38,7 @@ func init() {
 
 func runRuntimeInstall(_ *cobra.Command, _ []string) error {
 	mgr := runtimemgr.NewManager()
-	_, err := mgr.Install(runtimeInstallVersion, runtimeInstallNoBuild)
+	_, err := mgr.Install(runtimeInstallVersion, runtimeInstallNoPrebuilt, runtimeInstallNoBuild)
 	return err
 }
 

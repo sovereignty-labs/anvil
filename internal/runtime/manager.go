@@ -157,7 +157,7 @@ func (m *Manager) runtimeBinaryPath(name string) (string, error) {
 
 // Install downloads a pre-built llama-server binary, or auto-builds from
 // source when the release does not provide a matching GPU binary.
-func (m *Manager) Install(version string, noBuild bool) (*RuntimeInfo, error) {
+func (m *Manager) Install(version string, noPrebuilt, noBuild bool) (*RuntimeInfo, error) {
 	if err := m.ensureDir(); err != nil {
 		return nil, fmt.Errorf("prepare runtimes dir: %w", err)
 	}
@@ -170,6 +170,16 @@ func (m *Manager) Install(version string, noBuild bool) (*RuntimeInfo, error) {
 		fmt.Fprint(os.Stderr, ", AMD GPU (ROCm available)\n")
 	} else {
 		fmt.Fprint(os.Stderr, ", CPU-only\n")
+	}
+
+	if !noPrebuilt {
+		info, err := m.installPrebuiltRuntime(version, platform)
+		if err == nil {
+			return info, nil
+		}
+		if !errors.Is(err, errPrebuiltRuntimeNotFound) {
+			return nil, err
+		}
 	}
 
 	var release *Release
@@ -708,6 +718,7 @@ func validateRuntimeName(name string) error {
 
 func runtimeNameForTag(tag string) string {
 	tag = strings.TrimSpace(tag)
+	tag = strings.TrimPrefix(tag, "llama-server-")
 	tag = strings.TrimPrefix(tag, "v")
 	if tag == "" {
 		tag = "latest"
