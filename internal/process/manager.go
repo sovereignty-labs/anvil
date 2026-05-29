@@ -185,13 +185,16 @@ func (p *ProcessInfo) startExitWatcher() {
 //
 // LD_LIBRARY_PATH is prepended with filepath.Dir(llamaServerPath) so the
 // release tarball's libllama-common.so / libllama.so / libggml*.so resolve
-// without needing a system-wide install. Empty llamaServerPath skips that.
+// without needing a system-wide install. Any caller-supplied or inherited
+// LD_LIBRARY_PATH entries are preserved after that prefix. Empty llamaServerPath
+// skips the runtime-dir prepend.
 // extraEnv carries caller-supplied overrides such as GGML_VK_VISIBLE_DEVICES or HIP_VISIBLE_DEVICES.
 func buildChildEnv(backend runtimemgr.BuildBackend, gpuIndex int, forceCPU bool, llamaServerPath string, extraEnv map[string]string) []string {
 	backend = normalizeBackend(backend)
 	parent := os.Environ()
 	filtered := make([]string, 0, len(parent)+len(extraEnv)+2)
 	existingLDP := ""
+	extraLDP := ""
 	overrides := make(map[string]struct{}, len(extraEnv))
 	hasCUDAOverride := false
 	hasHIPOverride := false
@@ -201,6 +204,7 @@ func buildChildEnv(backend runtimemgr.BuildBackend, gpuIndex int, forceCPU bool,
 			continue
 		}
 		if key == "LD_LIBRARY_PATH" {
+			extraLDP = extraEnv[key]
 			continue
 		}
 		if forceCPU && (key == "CUDA_VISIBLE_DEVICES" || key == "HIP_VISIBLE_DEVICES" || key == "GGML_VK_VISIBLE_DEVICES") {
@@ -254,16 +258,18 @@ func buildChildEnv(backend runtimemgr.BuildBackend, gpuIndex int, forceCPU bool,
 			}
 		}
 	}
+	pathEntries := make([]string, 0, 3)
 	if llamaServerPath != "" {
-		runtimeDir := filepath.Dir(llamaServerPath)
-		if existingLDP != "" {
-			filtered = append(filtered, fmt.Sprintf("LD_LIBRARY_PATH=%s:%s", runtimeDir, existingLDP))
-		} else {
-			filtered = append(filtered, fmt.Sprintf("LD_LIBRARY_PATH=%s", runtimeDir))
-		}
-	} else if existingLDP != "" {
-		// Preserve the parent's LD_LIBRARY_PATH when we have nothing to prepend.
-		filtered = append(filtered, "LD_LIBRARY_PATH="+existingLDP)
+		pathEntries = append(pathEntries, filepath.Dir(llamaServerPath))
+	}
+	if extraLDP != "" {
+		pathEntries = append(pathEntries, extraLDP)
+	}
+	if existingLDP != "" {
+		pathEntries = append(pathEntries, existingLDP)
+	}
+	if len(pathEntries) > 0 {
+		filtered = append(filtered, "LD_LIBRARY_PATH="+strings.Join(pathEntries, string(os.PathListSeparator)))
 	}
 	if len(overrides) > 0 {
 		keys := make([]string, 0, len(overrides))

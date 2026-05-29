@@ -1340,7 +1340,28 @@ func TestBuildChildEnvSetsLDLibraryPath(t *testing.T) {
 func TestBuildChildEnvPrependsToExistingLDP(t *testing.T) {
 	t.Setenv("LD_LIBRARY_PATH", "/usr/local/lib:/opt/foo/lib")
 	env := buildChildEnv(runtimemgr.BuildBackendCUDA, 0, false, "/opt/runtimes/llama-b9275/llama-server", nil)
-	want := "LD_LIBRARY_PATH=/opt/runtimes/llama-b9275:/usr/local/lib:/opt/foo/lib"
+	want := "LD_LIBRARY_PATH=" + strings.Join([]string{
+		"/opt/runtimes/llama-b9275",
+		strings.Join([]string{"/usr/local/lib", "/opt/foo/lib"}, string(os.PathListSeparator)),
+	}, string(os.PathListSeparator))
+	for _, e := range env {
+		if e == want {
+			return
+		}
+	}
+	t.Errorf("expected env to contain %q, got %v", want, ldEntries(env))
+}
+
+func TestBuildChildEnvPreservesConfiguredLDP(t *testing.T) {
+	t.Setenv("LD_LIBRARY_PATH", "/parent/lib")
+	env := buildChildEnv(runtimemgr.BuildBackendCUDA, 0, false, "/opt/runtimes/llama-b9275/llama-server", map[string]string{
+		"LD_LIBRARY_PATH": strings.Join([]string{"/config/cuda/lib", "/config/blas/lib"}, string(os.PathListSeparator)),
+	})
+	want := "LD_LIBRARY_PATH=" + strings.Join([]string{
+		"/opt/runtimes/llama-b9275",
+		strings.Join([]string{"/config/cuda/lib", "/config/blas/lib"}, string(os.PathListSeparator)),
+		"/parent/lib",
+	}, string(os.PathListSeparator))
 	for _, e := range env {
 		if e == want {
 			return
