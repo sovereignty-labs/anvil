@@ -18,7 +18,7 @@ func TestExtractQuants(t *testing.T) {
 		{Filename: "model-Q8_0.gguf"},
 		{Filename: "model-IQ4_XS.gguf"},
 		{Filename: "model-BF16.gguf"},
-		{Filename: "README.md"},        // ignored
+		{Filename: "README.md"},         // ignored
 		{Filename: "model-Q4_K_M.gguf"}, // dedup
 	}
 	got := extractQuants(siblings)
@@ -30,11 +30,11 @@ func TestExtractQuants(t *testing.T) {
 
 func TestFormatThousands(t *testing.T) {
 	cases := map[int64]string{
-		0:        "0",
-		42:       "42",
-		1234:     "1,234",
-		12345:    "12,345",
-		1234567:  "1,234,567",
+		0:       "0",
+		42:      "42",
+		1234:    "1,234",
+		12345:   "12,345",
+		1234567: "1,234,567",
 	}
 	for in, want := range cases {
 		if got := formatThousands(in); got != want {

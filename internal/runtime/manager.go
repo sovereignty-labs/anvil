@@ -486,16 +486,14 @@ func (m *Manager) Use(name string) error {
 	return os.WriteFile(m.activeFilePath(), []byte(name+"\n"), 0o644)
 }
 
-// Add registers an external llama-server binary.
+// Add registers an external llama-server binary and its co-located shared
+// libraries.
 func (m *Manager) Add(name, binaryPath string, backend BuildBackend) error {
 	if err := m.ensureDir(); err != nil {
 		return fmt.Errorf("prepare runtimes dir: %w", err)
 	}
 	if err := validateRuntimeName(name); err != nil {
 		return err
-	}
-	if strings.TrimSpace(string(backend)) == "" {
-		backend = BuildBackendCUDA
 	}
 
 	srcInfo, err := os.Stat(binaryPath)
@@ -504,6 +502,20 @@ func (m *Manager) Add(name, binaryPath string, backend BuildBackend) error {
 	}
 	if srcInfo.IsDir() {
 		return fmt.Errorf("%s is a directory, expected a llama-server binary", binaryPath)
+	}
+
+	srcDir := filepath.Dir(binaryPath)
+	sharedLibs, err := filepath.Glob(filepath.Join(srcDir, "*.so*"))
+	if err != nil {
+		return fmt.Errorf("scan shared libraries in %s: %w", srcDir, err)
+	}
+	if len(sharedLibs) == 0 {
+		return fmt.Errorf("source directory %s has no shared libraries; this is not a complete llama.cpp build dir", srcDir)
+	}
+
+	selectedBackend, err := selectAddBackend(backend, detectBackendFromSharedLibraries(sharedLibs))
+	if err != nil {
+		return err
 	}
 
 	destDir, err := m.runtimeDir(name)
@@ -525,13 +537,18 @@ func (m *Manager) Add(name, binaryPath string, backend BuildBackend) error {
 	if err := copyFile(binaryPath, destBinary); err != nil {
 		return err
 	}
+	for _, lib := range sharedLibs {
+		if err := copyFile(lib, filepath.Join(workDir, filepath.Base(lib))); err != nil {
+			return err
+		}
+	}
 	if err := os.Chmod(destBinary, 0o755); err != nil {
 		return fmt.Errorf("chmod copied llama-server: %w", err)
 	}
 	if err := writeSourceMarker(workDir, "custom"); err != nil {
 		return err
 	}
-	if err := writeBackendMarker(workDir, backend); err != nil {
+	if err := writeBackendMarker(workDir, selectedBackend); err != nil {
 		return err
 	}
 
@@ -543,6 +560,32 @@ func (m *Manager) Add(name, binaryPath string, backend BuildBackend) error {
 	}
 	cleanup = false
 	return nil
+}
+
+func selectAddBackend(override, detected BuildBackend) (BuildBackend, error) {
+	backend := strings.ToLower(strings.TrimSpace(string(override)))
+	switch backend {
+	case "", "auto":
+		return detected, nil
+	case string(BuildBackendCUDA), string(BuildBackendROCm), string(BuildBackendVulkan), string(BuildBackendCPU):
+		return BuildBackend(backend), nil
+	default:
+		return "", fmt.Errorf("invalid backend %q (expected cuda, rocm, vulkan, cpu, or auto)", override)
+	}
+}
+
+func detectBackendFromSharedLibraries(paths []string) BuildBackend {
+	for _, path := range paths {
+		switch {
+		case strings.HasPrefix(strings.ToLower(filepath.Base(path)), "libggml-cuda.so"):
+			return BuildBackendCUDA
+		case strings.HasPrefix(strings.ToLower(filepath.Base(path)), "libggml-hip.so"):
+			return BuildBackendROCm
+		case strings.HasPrefix(strings.ToLower(filepath.Base(path)), "libggml-vulkan.so"):
+			return BuildBackendVulkan
+		}
+	}
+	return BuildBackendCPU
 }
 
 // RuntimeBackend reads the backend metadata for the named runtime.

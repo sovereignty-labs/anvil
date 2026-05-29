@@ -181,9 +181,9 @@ func TestModelInfoSizeHuman(t *testing.T) {
 		bytes int64
 		want  string
 	}{
-		{1024 * 1024 * 1024 * 12, "12.0 GB"},     // 12 GB
+		{1024 * 1024 * 1024 * 12, "12.0 GB"},           // 12 GB
 		{1024*1024*1024*17 + 1024*1024*512, "17.5 GB"}, // 17.5 GB
-		{500 * 1024 * 1024, "500 MB"},              // 500 MB
+		{500 * 1024 * 1024, "500 MB"},                  // 500 MB
 	}
 
 	for _, tt := range tests {
