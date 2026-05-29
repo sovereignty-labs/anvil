@@ -963,7 +963,7 @@ func TestInstallTriggersAutoBuildWhenCudaAssetMissing(t *testing.T) {
 		}, nil
 	}
 
-	info, err := mgr.Install("", false)
+	info, err := mgr.Install("", true, false)
 	if err != nil {
 		t.Fatalf("Install() error: %v", err)
 	}

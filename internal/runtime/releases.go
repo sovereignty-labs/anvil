@@ -15,18 +15,39 @@ type Release struct {
 
 // ReleaseAsset is a downloadable asset in a llama.cpp release.
 type ReleaseAsset struct {
-	Name        string
-	DownloadURL string
-	Size        int64
+	Name        string `json:"name"`
+	DownloadURL string `json:"browser_download_url"`
+	Size        int64  `json:"size"`
 }
 
 type githubRelease struct {
-	TagName string `json:"tag_name"`
-	Assets  []struct {
-		Name        string `json:"name"`
-		DownloadURL string `json:"browser_download_url"`
-		Size        int64  `json:"size"`
-	} `json:"assets"`
+	TagName string         `json:"tag_name"`
+	Assets  []ReleaseAsset `json:"assets"`
+}
+
+func fetchGitHubJSON(endpoint string, dst any) (*http.Response, error) {
+	req, err := http.NewRequest(http.MethodGet, endpoint, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("User-Agent", "nollama")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		defer resp.Body.Close()
+		return resp, fmt.Errorf("fetching %s: %s", endpoint, resp.Status)
+	}
+
+	if err := json.NewDecoder(resp.Body).Decode(dst); err != nil {
+		resp.Body.Close()
+		return resp, fmt.Errorf("decoding %s: %w", endpoint, err)
+	}
+
+	return resp, nil
 }
 
 // FetchLatestRelease fetches the latest llama.cpp release from GitHub.
@@ -40,37 +61,19 @@ func FetchRelease(tag string) (*Release, error) {
 }
 
 func fetchRelease(label, endpoint string) (*Release, error) {
-	req, err := http.NewRequest(http.MethodGet, endpoint, nil)
-	if err != nil {
-		return nil, err
-	}
-	req.Header.Set("User-Agent", "nollama")
-
-	resp, err := http.DefaultClient.Do(req)
+	var payload githubRelease
+	resp, err := fetchGitHubJSON(endpoint, &payload)
 	if err != nil {
 		return nil, err
 	}
 	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("fetching GitHub release %s: %s", label, resp.Status)
-	}
-
-	var payload githubRelease
-	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
-		return nil, fmt.Errorf("decoding GitHub release %s: %w", label, err)
-	}
 
 	release := &Release{
 		TagName: payload.TagName,
 		Assets:  make([]ReleaseAsset, 0, len(payload.Assets)),
 	}
 	for _, asset := range payload.Assets {
-		release.Assets = append(release.Assets, ReleaseAsset{
-			Name:        asset.Name,
-			DownloadURL: asset.DownloadURL,
-			Size:        asset.Size,
-		})
+		release.Assets = append(release.Assets, asset)
 	}
 	return release, nil
 }

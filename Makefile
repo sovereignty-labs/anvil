@@ -5,7 +5,7 @@ LDFLAGS := -ldflags "-X github.com/sovereignty-labs/nollama/internal/version.Ver
                       -X github.com/sovereignty-labs/nollama/internal/version.Commit=$(COMMIT) \
                       -X github.com/sovereignty-labs/nollama/internal/version.Date=$(DATE)"
 
-.PHONY: build clean test
+.PHONY: build clean test package-runtime
 
 build:
 	go build $(LDFLAGS) -o nollama ./cmd/nollama
@@ -18,5 +18,8 @@ test:
 
 install: build
 	install -m 755 nollama /usr/local/bin/nollama
+
+package-runtime:
+	sh scripts/package-runtime.sh "$(SOURCE_RUNTIME_DIR)" "$(LLAMACPP_VERSION)" "$(BACKEND)"
 
 .DEFAULT_GOAL := build
