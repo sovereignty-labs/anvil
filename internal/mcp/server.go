@@ -6,10 +6,10 @@ import (
 	"os"
 	"strings"
 
+	mcpsrv "github.com/mark3labs/mcp-go/server"
 	"github.com/sovereignty-labs/nollama/internal/config"
 	"github.com/sovereignty-labs/nollama/internal/federation"
 	"github.com/sovereignty-labs/nollama/internal/version"
-	mcpsrv "github.com/mark3labs/mcp-go/server"
 )
 
 // Runner owns the MCP server lifecycle.

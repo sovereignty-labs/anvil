@@ -226,29 +226,148 @@ func TestRuntimeBackendReadsMetadataAndDefaultsToCUDA(t *testing.T) {
 	}
 }
 
-func TestAddWritesBackendMetadata(t *testing.T) {
-	dir := t.TempDir()
-	mgr := &Manager{runtimesDir: dir}
+func TestDetectBackendFromSharedLibraries(t *testing.T) {
+	cases := []struct {
+		name string
+		libs []string
+		want BuildBackend
+	}{
+		{
+			name: "cuda",
+			libs: []string{"libggml-base.so", "libggml-cuda.so", "libllama.so"},
+			want: BuildBackendCUDA,
+		},
+		{
+			name: "rocm",
+			libs: []string{"libggml-base.so", "libggml-hip.so", "libllama.so"},
+			want: BuildBackendROCm,
+		},
+		{
+			name: "vulkan",
+			libs: []string{"libggml-base.so", "libggml-vulkan.so", "libllama.so"},
+			want: BuildBackendVulkan,
+		},
+		{
+			name: "cpu",
+			libs: []string{"libggml-base.so", "libllama.so", "libmtmd.so"},
+			want: BuildBackendCPU,
+		},
+	}
 
-	binaryPath := filepath.Join(dir, "llama-server")
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			for _, name := range tc.libs {
+				if err := os.WriteFile(filepath.Join(dir, name), []byte(name), 0o644); err != nil {
+					t.Fatal(err)
+				}
+			}
+
+			paths, err := filepath.Glob(filepath.Join(dir, "*.so*"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := detectBackendFromSharedLibraries(paths); got != tc.want {
+				t.Fatalf("detectBackendFromSharedLibraries() = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestAddBackendOverrideBeatsDetection(t *testing.T) {
+	runtimeDir := t.TempDir()
+	srcDir := t.TempDir()
+	mgr := &Manager{runtimesDir: runtimeDir}
+
+	binaryPath := filepath.Join(srcDir, runtimeBinaryName())
 	if err := os.WriteFile(binaryPath, []byte("#!/bin/sh\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
+	for _, name := range []string{"libggml-cuda.so", "libllama.so"} {
+		if err := os.WriteFile(filepath.Join(srcDir, name), []byte(name), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
 
-	if err := mgr.Add("custom-runtime", binaryPath, BuildBackendVulkan); err != nil {
+	if err := mgr.Add("custom-runtime", binaryPath, BuildBackendROCm); err != nil {
 		t.Fatalf("Add() error: %v", err)
 	}
 
-	if got := mgr.RuntimeBackend("custom-runtime"); got != BuildBackendVulkan {
-		t.Fatalf("RuntimeBackend() = %q, want vulkan", got)
+	if got := mgr.RuntimeBackend("custom-runtime"); got != BuildBackendROCm {
+		t.Fatalf("RuntimeBackend() = %q, want rocm", got)
 	}
 
-	data, err := os.ReadFile(filepath.Join(dir, "custom-runtime", "backend"))
+	data, err := os.ReadFile(filepath.Join(runtimeDir, "custom-runtime", "backend"))
 	if err != nil {
 		t.Fatalf("read backend metadata: %v", err)
 	}
-	if strings.TrimSpace(string(data)) != "vulkan" {
-		t.Fatalf("backend metadata = %q, want vulkan", strings.TrimSpace(string(data)))
+	if strings.TrimSpace(string(data)) != "rocm" {
+		t.Fatalf("backend metadata = %q, want rocm", strings.TrimSpace(string(data)))
+	}
+}
+
+func TestAddCopiesSharedLibraries(t *testing.T) {
+	runtimeDir := t.TempDir()
+	srcDir := t.TempDir()
+	mgr := &Manager{runtimesDir: runtimeDir}
+
+	binaryPath := filepath.Join(srcDir, runtimeBinaryName())
+	if err := os.WriteFile(binaryPath, []byte("BINARY"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	libs := map[string]string{
+		"libggml-base.so":   "BASE",
+		"libggml-cuda.so":   "CUDA",
+		"libggml-cuda.so.0": "CUDA0",
+		"libllama.so":       "LLAMA",
+		"libmtmd.so.0.0.1":  "MTMD",
+	}
+	for name, data := range libs {
+		if err := os.WriteFile(filepath.Join(srcDir, name), []byte(data), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	if err := mgr.Add("custom-runtime", binaryPath, BuildBackendAuto); err != nil {
+		t.Fatalf("Add() error: %v", err)
+	}
+
+	destDir := filepath.Join(runtimeDir, "custom-runtime")
+	for _, name := range []string{runtimeBinaryName(), "libggml-base.so", "libggml-cuda.so", "libggml-cuda.so.0", "libllama.so", "libmtmd.so.0.0.1"} {
+		data, err := os.ReadFile(filepath.Join(destDir, name))
+		if err != nil {
+			t.Fatalf("read %s: %v", name, err)
+		}
+		want := "BINARY"
+		if name != runtimeBinaryName() {
+			want = libs[name]
+		}
+		if string(data) != want {
+			t.Fatalf("%s = %q, want %q", name, data, want)
+		}
+	}
+
+	if got := mgr.RuntimeBackend("custom-runtime"); got != BuildBackendCUDA {
+		t.Fatalf("RuntimeBackend() = %q, want cuda", got)
+	}
+}
+
+func TestAddRejectsIncompleteSourceDir(t *testing.T) {
+	runtimeDir := t.TempDir()
+	srcDir := t.TempDir()
+	mgr := &Manager{runtimesDir: runtimeDir}
+
+	binaryPath := filepath.Join(srcDir, runtimeBinaryName())
+	if err := os.WriteFile(binaryPath, []byte("BINARY"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	err := mgr.Add("custom-runtime", binaryPath, BuildBackendAuto)
+	if err == nil {
+		t.Fatal("expected Add() to fail when source dir has no shared libraries")
+	}
+	if !strings.Contains(err.Error(), "has no shared libraries") {
+		t.Fatalf("Add() error = %v, want missing shared libraries", err)
 	}
 }
 

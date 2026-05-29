@@ -82,5 +82,5 @@ func TestVersionStringEmptyStringsFallToDefaults(t *testing.T) {
 
 type vars struct{ v, c, d string }
 
-func saveVars() vars                  { return vars{Version, Commit, Date} }
-func (s vars) restore()               { Version, Commit, Date = s.v, s.c, s.d }
+func saveVars() vars    { return vars{Version, Commit, Date} }
+func (s vars) restore() { Version, Commit, Date = s.v, s.c, s.d }

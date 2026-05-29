@@ -12,9 +12,9 @@ import (
 	"strings"
 	"testing"
 
+	mcpkit "github.com/mark3labs/mcp-go/mcp"
 	"github.com/sovereignty-labs/nollama/internal/config"
 	"github.com/sovereignty-labs/nollama/internal/model"
-	mcpkit "github.com/mark3labs/mcp-go/mcp"
 )
 
 func TestToolStatusAggregatesLocalAndRemote(t *testing.T) {

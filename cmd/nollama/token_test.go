@@ -96,8 +96,8 @@ func TestTokenRoundTripSetShowRm(t *testing.T) {
 func TestMaskToken(t *testing.T) {
 	cases := map[string]string{
 		"hf_NCh-REDACTED-SECRET-sDSti": "hf_NCh...sDSti",
-		"short":                                "*****",
-		"":                                     "",
+		"short":                                 "*****",
+		"":                                      "",
 	}
 	for in, want := range cases {
 		if got := maskToken(in); got != want {
