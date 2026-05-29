@@ -23,10 +23,8 @@ type buildTools struct {
 	hipcc string
 }
 
-// checkBuildTools resolves the required toolchain on PATH. Returns an error
-// when git or cmake is missing.
-func checkBuildTools() (buildTools, error) {
-	t := buildTools{
+func collectBuildTools() buildTools {
+	return buildTools{
 		git:   lookPathOrEmpty("git"),
 		cmake: lookPathOrEmpty("cmake"),
 		make:  lookPathOrEmpty("make"),
@@ -34,18 +32,53 @@ func checkBuildTools() (buildTools, error) {
 		nvcc:  lookPathOrEmpty("nvcc"),
 		hipcc: lookPathOrEmpty("hipcc"),
 	}
-	var missing []string
+}
+
+func appendMissingPackage(missing []string, seen map[string]struct{}, pkg string) []string {
+	if _, ok := seen[pkg]; ok {
+		return missing
+	}
+	seen[pkg] = struct{}{}
+	return append(missing, pkg)
+}
+
+func buildPrereqError(missing []string) error {
+	return fmt.Errorf("Error: missing build dependencies. Install with:\n  sudo apt install %s\n\nOn other distros, install the equivalents of cmake, gcc/build-essential, make or ninja, and cuda-toolkit or rocm-hip-sdk as needed.", strings.Join(missing, " "))
+}
+
+// checkBuildTools resolves the required toolchain on PATH and reports all
+// missing dependencies in one error.
+func checkBuildTools(backend BuildBackend) (buildTools, error) {
+	t := collectBuildTools()
+	seen := make(map[string]struct{}, 4)
+	missing := make([]string, 0, 4)
+
 	if t.git == "" {
-		missing = append(missing, "git")
+		missing = appendMissingPackage(missing, seen, "git")
 	}
 	if t.cmake == "" {
-		missing = append(missing, "cmake")
+		missing = appendMissingPackage(missing, seen, "cmake")
+	}
+	if findCXXCompiler() == "" {
+		missing = appendMissingPackage(missing, seen, "build-essential")
 	}
 	if t.make == "" && t.ninja == "" {
-		missing = append(missing, "make or ninja")
+		missing = appendMissingPackage(missing, seen, "build-essential")
 	}
+
+	switch backend {
+	case BuildBackendCUDA:
+		if t.nvcc == "" {
+			missing = appendMissingPackage(missing, seen, "nvidia-cuda-toolkit")
+		}
+	case BuildBackendROCm:
+		if t.hipcc == "" {
+			missing = appendMissingPackage(missing, seen, "rocm-hip-sdk")
+		}
+	}
+
 	if len(missing) > 0 {
-		return t, fmt.Errorf("missing build tool(s): %s — install via your package manager (e.g. apt install build-essential cmake git)", strings.Join(missing, ", "))
+		return t, buildPrereqError(missing)
 	}
 	return t, nil
 }
@@ -113,30 +146,41 @@ func findCUDAToolkit() (string, string) {
 }
 
 func checkAutoBuildPrereqs(backend BuildBackend) (string, string, error) {
-	if lookPathOrEmpty("git") == "" {
-		return "", "", fmt.Errorf("Error: git is required to build from source. Install with: sudo apt install git")
+	t := collectBuildTools()
+	seen := make(map[string]struct{}, 4)
+	missing := make([]string, 0, 4)
+	nvccPath := ""
+	toolkitRoot := ""
+	if t.git == "" {
+		missing = appendMissingPackage(missing, seen, "git")
 	}
-	if lookPathOrEmpty("cmake") == "" {
-		return "", "", fmt.Errorf("Error: cmake is required to build from source. Install with: sudo apt install cmake")
+	if t.cmake == "" {
+		missing = appendMissingPackage(missing, seen, "cmake")
 	}
 	if findCXXCompiler() == "" {
-		return "", "", fmt.Errorf("Error: a C++ compiler is required. Install with: sudo apt install build-essential")
+		missing = appendMissingPackage(missing, seen, "build-essential")
 	}
-
+	if t.make == "" && t.ninja == "" {
+		missing = appendMissingPackage(missing, seen, "build-essential")
+	}
 	switch backend {
 	case BuildBackendCUDA:
 		if nvcc, root := findCUDAToolkit(); root != "" {
-			return nvcc, root, nil
+			nvccPath = nvcc
+			toolkitRoot = root
+		} else {
+			missing = appendMissingPackage(missing, seen, "nvidia-cuda-toolkit")
 		}
-		return "", "", fmt.Errorf("Error: CUDA toolkit is required. Install with: sudo apt install cuda-toolkit")
 	case BuildBackendROCm:
-		if lookPathOrEmpty("hipcc") == "" {
-			return "", "", fmt.Errorf("Error: ROCm toolkit is required. Install the ROCm HIP toolchain so hipcc is available.")
+		if t.hipcc == "" {
+			missing = appendMissingPackage(missing, seen, "rocm-hip-sdk")
 		}
-		return "", "", nil
-	default:
-		return "", "", nil
 	}
+
+	if len(missing) > 0 {
+		return "", "", buildPrereqError(missing)
+	}
+	return nvccPath, toolkitRoot, nil
 }
 
 func autoBuildCMakeArgs(backend BuildBackend, toolkitRoot string, nvccPath string) []string {

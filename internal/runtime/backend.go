@@ -29,14 +29,8 @@ func resolveBuildBackend(requested string) (backendSelection, error) {
 	case "", "auto":
 		return detectBuildBackend()
 	case string(BuildBackendCUDA):
-		if lookPathOrEmpty("nvcc") == "" {
-			return backendSelection{}, fmt.Errorf("cuda build requires nvcc on PATH")
-		}
 		return backendSelection{backend: BuildBackendCUDA, label: "CUDA (forced by --backend)"}, nil
 	case string(BuildBackendROCm):
-		if err := ensureROCmBuildPrereqs(); err != nil {
-			return backendSelection{}, err
-		}
 		return backendSelection{backend: BuildBackendROCm, label: "ROCm (forced by --backend)"}, nil
 	case string(BuildBackendVulkan):
 		if err := ensureVulkanBuildPrereqs(); err != nil {
