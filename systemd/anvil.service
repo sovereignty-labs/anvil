@@ -5,8 +5,12 @@ After=network.target
 
 [Service]
 Type=simple
-User=anvil
-Group=anvil
+# Set these to the user that ran `anvil runtime install`.
+# anvil resolves runtimes from that user's ~/.local/share/anvil/runtimes.
+# If you leave the service running as root, runtimes must live in
+# /root/.local/share/anvil/runtimes or /var/lib/anvil/runtimes instead.
+User=CHANGE_ME
+Group=CHANGE_ME
 ExecStart=/usr/local/bin/anvil serve --config /etc/anvil/config.yaml
 ExecReload=/bin/kill -HUP $MAINPID
 Restart=on-failure
@@ -19,6 +23,8 @@ TimeoutStopSec=30
 
 # Environment
 Environment=ANVIL_LLAMA_SERVER=/usr/local/bin/llama-server
+# CUDA users with non-standard library paths may need this:
+# Environment=LD_LIBRARY_PATH=/usr/local/cuda/lib64
 
 # Security hardening (optional — comment out if causing issues)
 # ProtectSystem=strict
