@@ -7,8 +7,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/sovereignty-labs/nollama/internal/config"
-	"github.com/sovereignty-labs/nollama/internal/pull"
+	"github.com/sovereignty-labs/anvil/internal/config"
+	"github.com/sovereignty-labs/anvil/internal/pull"
 	"github.com/spf13/cobra"
 )
 
@@ -178,7 +178,7 @@ func printAmbiguous(spec pull.PullSpec, matches []pull.GGUFFile) {
 	for _, file := range matches {
 		fmt.Fprintf(os.Stderr, "  %-9s %-40s (%s)\n", pull.GuessQuantFromFilename(file.Name), file.Name, humanSize(file.Size))
 	}
-	fmt.Fprintf(os.Stderr, "\nBe more specific: nollama pull %s/%s:%s\n", spec.Org, spec.Repo, pull.GuessQuantFromFilename(matches[0].Name))
+	fmt.Fprintf(os.Stderr, "\nBe more specific: anvil pull %s/%s:%s\n", spec.Org, spec.Repo, pull.GuessQuantFromFilename(matches[0].Name))
 }
 
 func humanSize(bytes int64) string {

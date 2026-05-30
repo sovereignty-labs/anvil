@@ -7,7 +7,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// passthroughHarness builds a cobra command that mimics `nollama load`'s arg
+// passthroughHarness builds a cobra command that mimics `anvil load`'s arg
 // shape so we can drive collectPassthrough / exactPositionalArgs through
 // cobra's actual flag parser (including ArgsLenAtDash).
 func passthroughHarness(t *testing.T, cli []string) (collected []string, args []string, err error) {

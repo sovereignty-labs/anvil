@@ -16,7 +16,7 @@ func TestVersionCommandRuns(t *testing.T) {
 	}
 
 	got := out.String()
-	if !strings.HasPrefix(got, "nollama ") {
-		t.Errorf("expected output to start with 'nollama ', got %q", got)
+	if !strings.HasPrefix(got, "anvil ") {
+		t.Errorf("expected output to start with 'anvil ', got %q", got)
 	}
 }

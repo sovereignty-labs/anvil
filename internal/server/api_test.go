@@ -16,8 +16,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sovereignty-labs/nollama/internal/config"
-	"github.com/sovereignty-labs/nollama/internal/model"
+	"github.com/sovereignty-labs/anvil/internal/config"
+	"github.com/sovereignty-labs/anvil/internal/model"
 )
 
 func TestHandleModels(t *testing.T) {
@@ -215,10 +215,10 @@ func TestLoadModelUsesEntryRuntimeBackendAndBinary(t *testing.T) {
 	runtimesDir := filepath.Join(root, "runtimes")
 	modelDir := filepath.Join(root, "models")
 
-	if err := os.MkdirAll(filepath.Join(xdgConfigHome, "nollama"), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(xdgConfigHome, "anvil"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(xdgConfigHome, "nollama", "config.yaml"), []byte("runtimes_dir: "+runtimesDir+"\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(xdgConfigHome, "anvil", "config.yaml"), []byte("runtimes_dir: "+runtimesDir+"\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv("XDG_CONFIG_HOME", xdgConfigHome)

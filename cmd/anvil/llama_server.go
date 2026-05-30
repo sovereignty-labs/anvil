@@ -5,8 +5,8 @@ import (
 	"os"
 	"strings"
 
-	"github.com/sovereignty-labs/nollama/internal/config"
-	runtimemgr "github.com/sovereignty-labs/nollama/internal/runtime"
+	"github.com/sovereignty-labs/anvil/internal/config"
+	runtimemgr "github.com/sovereignty-labs/anvil/internal/runtime"
 	"github.com/spf13/cobra"
 )
 
@@ -29,7 +29,7 @@ func resolveLlamaServerPathWithRuntime(cmd *cobra.Command, cfg *config.Config, r
 		return path, mgr.RuntimeBackend(runtimeName), nil
 	}
 
-	if path := os.Getenv("NOLLAMA_LLAMA_SERVER"); path != "" {
+	if path := os.Getenv("ANVIL_LLAMA_SERVER"); path != "" {
 		return path, runtimemgr.BuildBackendCUDA, nil
 	}
 
@@ -59,7 +59,7 @@ func resolveLlamaServerPathWithRuntime(cmd *cobra.Command, cfg *config.Config, r
 		return path, mgr.RuntimeBackend(activeName), nil
 	}
 
-	return "", runtimemgr.BuildBackendCUDA, fmt.Errorf("no llama-server found. Run `nollama runtime install` or set --llama-server")
+	return "", runtimemgr.BuildBackendCUDA, fmt.Errorf("no llama-server found. Run `anvil runtime install` or set --llama-server")
 }
 
 func getRuntimeFlag(cmd *cobra.Command) string {

@@ -6,15 +6,15 @@ import (
 	"log/slog"
 	"os"
 
-	"github.com/sovereignty-labs/nollama/internal/config"
-	"github.com/sovereignty-labs/nollama/internal/server"
+	"github.com/sovereignty-labs/anvil/internal/config"
+	"github.com/sovereignty-labs/anvil/internal/server"
 	"github.com/spf13/cobra"
 )
 
 var serveCmd = &cobra.Command{
 	Use:   "serve",
-	Short: "Run nollama as a daemon",
-	Long: `Run nollama as a long-running daemon that manages llama-server processes.
+	Short: "Run anvil as a daemon",
+	Long: `Run anvil as a long-running daemon that manages llama-server processes.
 
 With --config, loads a config file and autoloads models on startup.
 Without --config, starts with defaults and waits for load commands.

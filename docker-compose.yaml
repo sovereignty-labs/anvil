@@ -1,5 +1,5 @@
 services:
-  nollama:
+  anvil:
     build:
       context: .
       dockerfile: Dockerfile
@@ -7,15 +7,15 @@ services:
         VERSION: dev
         COMMIT: none
         DATE: unknown
-    image: git.hirdforge.com/kit/nollama/nollama:latest
-    container_name: nollama
+    image: git.hirdforge.com/kit/anvil/anvil:latest
+    container_name: anvil
     restart: unless-stopped
     ports:
       - "11434:11434"
     volumes:
       - /mnt/models/gguf:/mnt/models/gguf:ro
     # Uncomment when llama-server runs inside this compose stack and you want
-    # nollama (or a sibling llama-server service) to use the host GPU(s).
+    # anvil (or a sibling llama-server service) to use the host GPU(s).
     #
     # runtime: nvidia
     # environment:

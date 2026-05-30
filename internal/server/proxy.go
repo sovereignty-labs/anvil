@@ -1,4 +1,4 @@
-// Package server implements the nollama serve daemon and API proxy.
+// Package server implements the anvil serve daemon and API proxy.
 package server
 
 import (
@@ -14,7 +14,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/sovereignty-labs/nollama/internal/model"
+	"github.com/sovereignty-labs/anvil/internal/model"
 )
 
 // Route maps a model name to a llama-server backend.
@@ -440,7 +440,7 @@ func (p *Proxy) handleModels(w http.ResponseWriter, r *http.Request) {
 			ID:      stem,
 			Object:  "model",
 			Created: time.Now().Unix(),
-			OwnedBy: "nollama",
+			OwnedBy: "anvil",
 		})
 	}
 
@@ -456,7 +456,7 @@ func (p *Proxy) handleModels(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(resp)
 }
 
-// handleHealth returns nollama health status.
+// handleHealth returns anvil health status.
 func (p *Proxy) handleHealth(w http.ResponseWriter, r *http.Request) {
 	p.mu.RLock()
 	count := len(p.all)

@@ -1,4 +1,4 @@
-// Package process manages llama-server child processes spawned by nollama.
+// Package process manages llama-server child processes spawned by anvil.
 package process
 
 import (
@@ -15,8 +15,8 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/sovereignty-labs/nollama/internal/hardware"
-	runtimemgr "github.com/sovereignty-labs/nollama/internal/runtime"
+	"github.com/sovereignty-labs/anvil/internal/hardware"
+	runtimemgr "github.com/sovereignty-labs/anvil/internal/runtime"
 )
 
 // StartOpts holds the configuration for starting a new llama-server process.
@@ -29,7 +29,7 @@ type StartOpts struct {
 	ExtraFlags   []string // additional llama-server flags
 	Env          map[string]string
 	Hardware     *hardware.Inventory
-	ReservedPort int // port that should be avoided (e.g. nollama proxy port)
+	ReservedPort int // port that should be avoided (e.g. anvil proxy port)
 	PinnedPort   int // when > 0, bind to this exact port instead of auto-assigning
 	ReadyTimeout time.Duration
 }
@@ -88,7 +88,7 @@ func init() {
 	defaultManager = &Manager{
 		procs:   make(map[int]*ProcessInfo),
 		portMap: make(map[int]*ProcessInfo),
-		logDir:  "/tmp/nollama",
+		logDir:  "/tmp/anvil",
 		logger:  slog.Default(),
 	}
 	_ = os.MkdirAll(defaultManager.logDir, 0o755)
@@ -116,7 +116,7 @@ func NewManager(logger *slog.Logger) *Manager {
 	m := &Manager{
 		procs:   make(map[int]*ProcessInfo),
 		portMap: make(map[int]*ProcessInfo),
-		logDir:  "/tmp/nollama",
+		logDir:  "/tmp/anvil",
 		logger:  logger,
 	}
 	_ = os.MkdirAll(m.logDir, 0o755)
@@ -709,13 +709,13 @@ func (m *Manager) diagnoseCrash(port int) error {
 	logPath := m.logPath(port)
 	data, err := os.ReadFile(logPath)
 	if err != nil {
-		return fmt.Errorf("llama-server crashed during model loading. Check the log: %s\n  This usually means the runtime is too old for this model. Try: nollama runtime install", logPath)
+		return fmt.Errorf("llama-server crashed during model loading. Check the log: %s\n  This usually means the runtime is too old for this model. Try: anvil runtime install", logPath)
 	}
 
 	tail := lastLogLines(string(data), 50)
 	diagnosis := classifyCrashLog(tail)
 	if diagnosis == "" {
-		diagnosis = fmt.Sprintf("llama-server crashed during model loading. Check the log: %s\n  This usually means the runtime is too old for this model. Try: nollama runtime install", logPath)
+		diagnosis = fmt.Sprintf("llama-server crashed during model loading. Check the log: %s\n  This usually means the runtime is too old for this model. Try: anvil runtime install", logPath)
 	} else {
 		diagnosis = fmt.Sprintf("llama-server crashed during model loading. Check the log: %s\n  %s", logPath, diagnosis)
 	}
@@ -739,11 +739,11 @@ func classifyCrashLog(logText string) string {
 	case strings.Contains(lower, "nvrm: bar1 is 0m"):
 		return "GPU BAR allocation failed. Enable 'Above 4G Decoding' in BIOS."
 	case strings.Contains(lower, "unsupported gpu architecture"), strings.Contains(lower, "ptxas fatal"):
-		return "llama-server was built for a different GPU architecture. Rebuild with: nollama runtime build"
+		return "llama-server was built for a different GPU architecture. Rebuild with: anvil runtime build"
 	case strings.Contains(lower, "cuda error: out of memory"), strings.Contains(lower, "not enough vram"):
 		return "Not enough VRAM. Try a smaller model or reduce --ctx-size."
 	case strings.Contains(lower, "unknown model architecture"), strings.Contains(lower, "unrecognized model"):
-		return "This model architecture is not supported by your llama-server version. Update with: nollama runtime install"
+		return "This model architecture is not supported by your llama-server version. Update with: anvil runtime install"
 	default:
 		return ""
 	}

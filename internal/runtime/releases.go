@@ -30,7 +30,7 @@ func fetchGitHubJSON(endpoint string, dst any) (*http.Response, error) {
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("User-Agent", "nollama")
+	req.Header.Set("User-Agent", "anvil")
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {

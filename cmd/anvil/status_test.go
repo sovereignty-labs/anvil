@@ -3,7 +3,7 @@ package main
 import (
 	"testing"
 
-	"github.com/sovereignty-labs/nollama/internal/federation"
+	"github.com/sovereignty-labs/anvil/internal/federation"
 )
 
 func TestParseDeviceIndex(t *testing.T) {

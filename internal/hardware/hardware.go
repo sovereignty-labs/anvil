@@ -1,4 +1,4 @@
-// Package hardware provides GPU and CPU detection for nollama.
+// Package hardware provides GPU and CPU detection for anvil.
 package hardware
 
 import (

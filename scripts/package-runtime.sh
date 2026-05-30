@@ -57,7 +57,7 @@ case "$llamacpp_version" in
     ;;
 esac
 
-staging_dir=$(mktemp -d "${TMPDIR:-/tmp}/nollama-runtime.XXXXXX")
+staging_dir=$(mktemp -d "${TMPDIR:-/tmp}/anvil-runtime.XXXXXX")
 cleanup() {
   rm -rf "$staging_dir"
 }
@@ -75,7 +75,7 @@ for path in "$source_dir"/*.so*; do
 done
 
 printf '%s\n' "$backend" > "$staging_dir/backend"
-cat > "$staging_dir/nollama-runtime.json" <<EOF
+cat > "$staging_dir/anvil-runtime.json" <<EOF
 {"llamacpp_version":"$llamacpp_version","backend":"$backend","os":"linux","arch":"$arch"}
 EOF
 

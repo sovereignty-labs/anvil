@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	runtimemgr "github.com/sovereignty-labs/nollama/internal/runtime"
+	runtimemgr "github.com/sovereignty-labs/anvil/internal/runtime"
 )
 
 // makeTestResult creates a minimal Result for testing Start/Stop.
@@ -434,8 +434,8 @@ func TestNewManager(t *testing.T) {
 	if m.portMap == nil {
 		t.Fatal("NewManager returned manager with nil portMap")
 	}
-	if m.logDir != "/tmp/nollama" {
-		t.Errorf("expected default logDir /tmp/nollama, got %q", m.logDir)
+	if m.logDir != "/tmp/anvil" {
+		t.Errorf("expected default logDir /tmp/anvil, got %q", m.logDir)
 	}
 }
 
@@ -879,8 +879,8 @@ func TestProcessInfo_Uptime_Increasing(t *testing.T) {
 // Test that LogDir returns the configured value.
 func TestManager_LogDir(t *testing.T) {
 	manager := NewManager(nil)
-	if manager.LogDir() != "/tmp/nollama" {
-		t.Errorf("expected default log dir '/tmp/nollama', got %q", manager.LogDir())
+	if manager.LogDir() != "/tmp/anvil" {
+		t.Errorf("expected default log dir '/tmp/anvil', got %q", manager.LogDir())
 	}
 
 	manager.SetLogDir("/custom/logs")
@@ -1205,7 +1205,7 @@ func TestStartOptsStart_CPU_Device_Flags(t *testing.T) {
 func TestBuildChildEnvGPUIsolation(t *testing.T) {
 	t.Setenv("CUDA_VISIBLE_DEVICES", "stale")
 
-	env := buildChildEnv(runtimemgr.BuildBackendCUDA, 1, false, "/opt/nollama/runtimes/r1/llama-server", nil)
+	env := buildChildEnv(runtimemgr.BuildBackendCUDA, 1, false, "/opt/anvil/runtimes/r1/llama-server", nil)
 	want := "CUDA_VISIBLE_DEVICES=1"
 	found := false
 	stale := false

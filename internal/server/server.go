@@ -15,21 +15,21 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/sovereignty-labs/nollama/internal/config"
-	"github.com/sovereignty-labs/nollama/internal/hardware"
-	nollamamcp "github.com/sovereignty-labs/nollama/internal/mcp"
-	"github.com/sovereignty-labs/nollama/internal/process"
-	runtimemgr "github.com/sovereignty-labs/nollama/internal/runtime"
+	"github.com/sovereignty-labs/anvil/internal/config"
+	"github.com/sovereignty-labs/anvil/internal/hardware"
+	anvilmcp "github.com/sovereignty-labs/anvil/internal/mcp"
+	"github.com/sovereignty-labs/anvil/internal/process"
+	runtimemgr "github.com/sovereignty-labs/anvil/internal/runtime"
 )
 
-// Server is the nollama serve daemon.
+// Server is the anvil serve daemon.
 type Server struct {
 	cfg        *config.Config
 	cfgPath    string // path to config file (for SIGHUP reload)
 	proxy      *Proxy
 	procMgr    *process.Manager
 	httpServer *http.Server
-	mcpRunner  *nollamamcp.Runner
+	mcpRunner  *anvilmcp.Runner
 	logger     *slog.Logger
 
 	// stopProcessByPort is the hook the idle reaper calls to terminate a
@@ -66,7 +66,7 @@ func (s *Server) Run(ctx context.Context) error {
 	s.running = true
 	s.mu.Unlock()
 
-	s.logger.Info("nollama serve starting",
+	s.logger.Info("anvil serve starting",
 		"bind", s.cfg.Bind,
 		"model_dir", s.cfg.ModelDir,
 	)
@@ -107,7 +107,7 @@ func (s *Server) Run(ctx context.Context) error {
 	}
 
 	if s.cfg != nil && s.cfg.MCP != nil && s.cfg.MCP.Enabled {
-		s.mcpRunner = nollamamcp.NewRunner(s.cfg, "")
+		s.mcpRunner = anvilmcp.NewRunner(s.cfg, "")
 		if err := s.mcpRunner.Start(ctx); err != nil {
 			return fmt.Errorf("start MCP server: %w", err)
 		}
@@ -137,7 +137,7 @@ func (s *Server) Run(ctx context.Context) error {
 	defer cancelReaper()
 	go s.startIdleReaper(reaperCtx)
 
-	s.logger.Info("nollama serve ready",
+	s.logger.Info("anvil serve ready",
 		"models_loaded", s.proxy.RouteCount(),
 	)
 
@@ -185,7 +185,7 @@ func (s *Server) shutdown() error {
 	// Stop all llama-server processes
 	s.stopAllProcesses()
 
-	s.logger.Info("nollama serve stopped")
+	s.logger.Info("anvil serve stopped")
 	return nil
 }
 
@@ -324,7 +324,7 @@ func (s *Server) loadModel(entry config.AutoloadEntry, hw *hardware.Inventory) (
 		opts.Hardware = hw
 	}
 
-	// Pass nollama's bind port so the process manager can avoid it
+	// Pass anvil's bind port so the process manager can avoid it
 	_, portStr, err := net.SplitHostPort(s.cfg.Bind)
 	if err == nil {
 		var portNum int

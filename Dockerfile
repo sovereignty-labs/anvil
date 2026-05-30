@@ -10,12 +10,12 @@ ARG DATE=unknown
 RUN CGO_ENABLED=0 GOOS=linux go build \
     -trimpath \
     -ldflags "-s -w \
-      -X github.com/sovereignty-labs/nollama/internal/version.Version=${VERSION} \
-      -X github.com/sovereignty-labs/nollama/internal/version.Commit=${COMMIT} \
-      -X github.com/sovereignty-labs/nollama/internal/version.Date=${DATE}" \
-    -o /out/nollama ./cmd/nollama
+      -X github.com/sovereignty-labs/anvil/internal/version.Version=${VERSION} \
+      -X github.com/sovereignty-labs/anvil/internal/version.Commit=${COMMIT} \
+      -X github.com/sovereignty-labs/anvil/internal/version.Date=${DATE}" \
+    -o /out/anvil ./cmd/anvil
 
 FROM debian:bookworm-slim
 RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates && rm -rf /var/lib/apt/lists/*
-COPY --from=builder /out/nollama /usr/local/bin/nollama
-ENTRYPOINT ["nollama"]
+COPY --from=builder /out/anvil /usr/local/bin/anvil
+ENTRYPOINT ["anvil"]

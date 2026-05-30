@@ -1,13 +1,13 @@
 [Unit]
-Description=nollama — transparent llama-server manager
-Documentation=https://github.com/sovereignty-labs/nollama
+Description=anvil — transparent llama-server manager
+Documentation=https://github.com/sovereignty-labs/anvil
 After=network.target
 
 [Service]
 Type=simple
-User=nollama
-Group=nollama
-ExecStart=/usr/local/bin/nollama serve --config /etc/nollama/config.yaml
+User=anvil
+Group=anvil
+ExecStart=/usr/local/bin/anvil serve --config /etc/anvil/config.yaml
 ExecReload=/bin/kill -HUP $MAINPID
 Restart=on-failure
 RestartSec=5
@@ -18,18 +18,18 @@ KillSignal=SIGTERM
 TimeoutStopSec=30
 
 # Environment
-Environment=NOLLAMA_LLAMA_SERVER=/usr/local/bin/llama-server
+Environment=ANVIL_LLAMA_SERVER=/usr/local/bin/llama-server
 
 # Security hardening (optional — comment out if causing issues)
 # ProtectSystem=strict
 # ProtectHome=true
-# ReadWritePaths=/mnt/models /var/log/nollama
+# ReadWritePaths=/mnt/models /var/log/anvil
 # NoNewPrivileges=true
 
 # Logging
 StandardOutput=journal
 StandardError=journal
-SyslogIdentifier=nollama
+SyslogIdentifier=anvil
 
 [Install]
 WantedBy=multi-user.target

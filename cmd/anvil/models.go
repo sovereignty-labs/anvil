@@ -6,9 +6,9 @@ import (
 	"strings"
 	"text/tabwriter"
 
-	"github.com/sovereignty-labs/nollama/internal/config"
-	"github.com/sovereignty-labs/nollama/internal/federation"
-	"github.com/sovereignty-labs/nollama/internal/model"
+	"github.com/sovereignty-labs/anvil/internal/config"
+	"github.com/sovereignty-labs/anvil/internal/federation"
+	"github.com/sovereignty-labs/anvil/internal/model"
 	"github.com/spf13/cobra"
 )
 
@@ -22,9 +22,9 @@ read from GGUF headers.
 
 The model directory is determined by:
   1. --model-dir flag
-  2. NOLLAMA_MODEL_DIR environment variable
+  2. ANVIL_MODEL_DIR environment variable
   3. config file model_dir setting
-  4. Default: ~/.local/share/nollama/models`,
+  4. Default: ~/.local/share/anvil/models`,
 	RunE: runModels,
 }
 
@@ -69,7 +69,7 @@ func runModels(cmd *cobra.Command, args []string) error {
 
 	if len(models) == 0 {
 		fmt.Printf("No GGUF models found in %s\n", dir)
-		fmt.Println("Pull models with: nollama pull <org>/<repo>:<quant>")
+		fmt.Println("Pull models with: anvil pull <org>/<repo>:<quant>")
 		return nil
 	}
 
@@ -83,7 +83,7 @@ func resolveLocalModelDir() (string, error) {
 	if modelsDir != "" {
 		return modelsDir, nil
 	}
-	if dir := os.Getenv("NOLLAMA_MODEL_DIR"); dir != "" {
+	if dir := os.Getenv("ANVIL_MODEL_DIR"); dir != "" {
 		return dir, nil
 	}
 

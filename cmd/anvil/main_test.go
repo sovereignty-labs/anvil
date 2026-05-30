@@ -6,7 +6,7 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/sovereignty-labs/nollama/internal/config"
+	"github.com/sovereignty-labs/anvil/internal/config"
 	"github.com/spf13/cobra"
 )
 
@@ -85,7 +85,7 @@ func TestResolveLlamaServerPathUsesNamedRuntimeWhenRequested(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	configDir := filepath.Join(xdgDir, "nollama")
+	configDir := filepath.Join(xdgDir, "anvil")
 	if err := os.MkdirAll(configDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
