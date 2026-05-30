@@ -259,3 +259,5 @@ anvil exists because of [llama.cpp](https://github.com/ggml-org/llama.cpp), crea
 MIT. No VC. No cloud. No blob store. Just models on your hardware.
 
 Built by [Kit Porath](https://github.com/sovereignty-labs) at Sovereignty Labs.
+
+<!-- ci docs-skip test -->
