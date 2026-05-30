@@ -1,12 +1,8 @@
 # anvil
 
-**The model runner for GGUFs.**
+**Run models on your own iron.**
 
-One Go binary. Plain GGUFs. Transparent [llama-server](https://github.com/ggml-org/llama.cpp) under the hood. Federation across your fleet.
-
-anvil manages llama-server processes so you don't have to — without inserting itself into your inference path. Smart defaults from GGUF metadata. Full access to every llama.cpp flag. Zero overhead on the hot path.
-
-No blob store. No proprietary format. No cloud. MIT licensed.
+Ollama opened local LLMs to a generation of people, then drifted into a blob store, a closed desktop app, and a cloud pivot — leaving everyone who just wanted a clean local tool without one. Anvil is for them: a transparent wrapper over llama.cpp that manages your models and your whole fleet, then gets out of the way. No blob store, no proprietary format, no cloud. Owned by you, not a funding round.
 
 ---
 

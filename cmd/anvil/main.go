@@ -34,7 +34,7 @@ func main() {
 
 var rootCmd = &cobra.Command{
 	Use:   "anvil",
-	Short: "The model runner for GGUFs",
+	Short: "Run models on your own iron.",
 	Long: `anvil — One Go binary. Plain GGUFs. Transparent llama-server under the hood.
 
 anvil manages llama-server processes with smart defaults derived from GGUF

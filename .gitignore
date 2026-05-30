@@ -1,5 +1,6 @@
 # Binary
 /anvil
+/anvil-linux-amd64
 
 # IDE
 .idea/
