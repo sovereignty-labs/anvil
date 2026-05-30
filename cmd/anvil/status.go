@@ -184,6 +184,18 @@ func buildStatusRows(nodeName string, resp *federation.StatusResponse) []statusR
 			Uptime: processFormatDuration(time.Duration(model.UptimeSeconds) * time.Second),
 		})
 	}
+	for _, failed := range resp.AutoloadErrors {
+		rows = append(rows, statusRow{
+			Node:   nodeName,
+			GPU:    "ERROR",
+			Model:  failed.Model,
+			Alias:  statusAlias(failed.Alias),
+			VRAM:   "—",
+			Port:   "—",
+			PID:    "—",
+			Uptime: failed.Error,
+		})
+	}
 
 	return rows
 }

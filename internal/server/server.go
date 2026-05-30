@@ -32,6 +32,9 @@ type Server struct {
 	mcpRunner  *anvilmcp.Runner
 	logger     *slog.Logger
 
+	autoloadMu     sync.RWMutex
+	autoloadErrors []autoloadError
+
 	// stopProcessByPort is the hook the idle reaper calls to terminate a
 	// llama-server process. Defaults to procMgr.StopByPort; tests override.
 	stopProcessByPort func(int) (*process.ProcessInfo, error)
@@ -99,6 +102,7 @@ func (s *Server) Run(ctx context.Context) error {
 	mux.HandleFunc("/api/pull", s.handlePull)
 	mux.HandleFunc("/api/rm", s.handleRm)
 	mux.HandleFunc("/api/status", s.handleStatus)
+	mux.HandleFunc("/health", s.handleHealth)
 	mux.HandleFunc("/metrics", s.handleMetrics)
 	mux.Handle("/", s.proxy)
 	s.httpServer = &http.Server{
@@ -226,13 +230,23 @@ func (s *Server) reloadConfig() error {
 
 // autoloadModels loads all models from the autoload config section.
 func (s *Server) autoloadModels(hw *hardware.Inventory) {
+	s.setAutoloadErrors(nil)
+	runtimesDir, runtimesDirErr := runtimemgr.NewManager().RuntimesDir()
+	if runtimesDirErr != nil {
+		runtimesDir = runtimesDirErr.Error()
+	}
 	for i, entry := range s.cfg.Autoload {
 		modelPath := s.cfg.ModelPath(entry.Model)
 
 		if _, err := os.Stat(modelPath); os.IsNotExist(err) {
-			s.logger.Error("autoload model not found",
+			err = fmt.Errorf("model not found at %s", modelPath)
+			s.recordAutoloadError(entry, err)
+			s.logger.Error("autoload failed",
 				"model", entry.Model,
+				"alias", entry.Alias,
 				"path", modelPath,
+				"runtimes_dir", runtimesDir,
+				"error", err,
 			)
 			continue
 		}
@@ -245,8 +259,11 @@ func (s *Server) autoloadModels(hw *hardware.Inventory) {
 
 		port, err := s.loadModel(entry, hw)
 		if err != nil {
+			s.recordAutoloadError(entry, err)
 			s.logger.Error("autoload failed",
 				"model", entry.Model,
+				"alias", entry.Alias,
+				"runtimes_dir", runtimesDir,
 				"error", err,
 			)
 			continue
@@ -273,9 +290,13 @@ func (s *Server) loadModel(entry config.AutoloadEntry, hw *hardware.Inventory) (
 	)
 	if strings.TrimSpace(entry.Runtime) != "" {
 		mgr := runtimemgr.NewManager()
+		runtimesDir, dirErr := mgr.RuntimesDir()
+		if dirErr != nil {
+			return 0, fmt.Errorf("resolve runtimes dir for runtime %q: %w", entry.Runtime, dirErr)
+		}
 		llamaServer, err = mgr.ResolveNamed(entry.Runtime)
 		if err != nil {
-			return 0, fmt.Errorf("resolve runtime %q: %w", entry.Runtime, err)
+			return 0, fmt.Errorf("runtime %q not found in %s: %w", entry.Runtime, runtimesDir, err)
 		}
 		backend = mgr.RuntimeBackend(entry.Runtime)
 	} else {
@@ -337,6 +358,36 @@ func (s *Server) loadModel(entry config.AutoloadEntry, hw *hardware.Inventory) (
 	}
 
 	return s.procMgr.StartOptsStart(opts)
+}
+
+func (s *Server) setAutoloadErrors(errs []autoloadError) {
+	s.autoloadMu.Lock()
+	defer s.autoloadMu.Unlock()
+	s.autoloadErrors = append([]autoloadError(nil), errs...)
+}
+
+func (s *Server) recordAutoloadError(entry config.AutoloadEntry, err error) {
+	if err == nil {
+		return
+	}
+	s.autoloadMu.Lock()
+	defer s.autoloadMu.Unlock()
+	s.autoloadErrors = append(s.autoloadErrors, autoloadError{
+		Model: entry.Model,
+		Alias: strings.TrimSpace(entry.Alias),
+		Error: err.Error(),
+	})
+}
+
+func (s *Server) autoloadErrorsSnapshot() []autoloadError {
+	s.autoloadMu.RLock()
+	defer s.autoloadMu.RUnlock()
+	if len(s.autoloadErrors) == 0 {
+		return nil
+	}
+	out := make([]autoloadError, len(s.autoloadErrors))
+	copy(out, s.autoloadErrors)
+	return out
 }
 
 func buildAutoloadEnv(entry config.AutoloadEntry, merged map[string]interface{}) (map[string]string, map[string]interface{}) {

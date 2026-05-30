@@ -9,11 +9,11 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"os/user"
 	"path/filepath"
 	stdruntime "runtime"
 	"sort"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/sovereignty-labs/anvil/internal/config"
@@ -41,46 +41,60 @@ type Manager struct {
 	runtimesDir string
 }
 
-// NewManager returns a manager rooted at ~/.local/share/anvil/runtimes/.
+// NewManager returns a manager rooted at the first resolvable runtimes dir.
 func NewManager() *Manager {
-	dir := defaultRuntimesDir()
-	_ = os.MkdirAll(dir, 0o755)
-	return &Manager{runtimesDir: dir}
+	m := &Manager{}
+	if dir, err := resolveRuntimesDir(); err == nil {
+		m.runtimesDir = dir
+	}
+	return m
 }
 
-func defaultRuntimesDir() string {
-	if dir := configuredRuntimesDir(); dir != "" {
-		return dir
-	}
-
-	varLib := filepath.Join("/var/lib", "anvil", DefaultRuntimesDir)
-	home := homeRuntimesDir()
-
-	if runtimeDirHasEntries(varLib) {
-		return varLib
-	}
-	if runtimeDirHasEntries(home) {
-		return home
-	}
-	if _, err := os.Stat(varLib); err == nil {
-		return varLib
-	}
-	if home != "" {
-		return home
-	}
-	return filepath.Join(os.TempDir(), "anvil", DefaultRuntimesDir)
-}
-
-func configuredRuntimesDir() string {
-	cfgPath := config.FindConfig()
+func configuredRuntimesDir() (string, bool) {
+	cfgPath := findConfigFn()
 	if cfgPath == "" {
-		return ""
+		return "", false
 	}
-	cfg, err := config.Load(cfgPath)
+	cfg, err := loadConfigFn(cfgPath)
 	if err != nil || cfg == nil || strings.TrimSpace(cfg.RuntimesDir) == "" {
+		return "", false
+	}
+	return normalizeRuntimeDir(cfg.RuntimesDir), true
+}
+
+func envRuntimesDir() (string, bool) {
+	dir := strings.TrimSpace(os.Getenv("ANVIL_RUNTIMES_DIR"))
+	if dir == "" {
+		return "", false
+	}
+	return normalizeRuntimeDir(dir), true
+}
+
+func homeEnvRuntimesDir() (string, bool) {
+	home := strings.TrimSpace(os.Getenv("HOME"))
+	if home == "" {
+		return "", false
+	}
+	return filepath.Join(home, ".local", "share", "anvil", DefaultRuntimesDir), true
+}
+
+func passwdHomeRuntimesDir() (string, bool) {
+	current, err := userCurrentFn()
+	if err != nil || current == nil {
+		return "", false
+	}
+	home := strings.TrimSpace(current.HomeDir)
+	if home == "" {
+		return "", false
+	}
+	return filepath.Join(home, ".local", "share", "anvil", DefaultRuntimesDir), true
+}
+
+func normalizeRuntimeDir(dir string) string {
+	dir = strings.TrimSpace(dir)
+	if dir == "" {
 		return ""
 	}
-	dir := strings.TrimSpace(cfg.RuntimesDir)
 	if !filepath.IsAbs(dir) {
 		abs, err := filepath.Abs(dir)
 		if err == nil {
@@ -90,50 +104,75 @@ func configuredRuntimesDir() string {
 	return dir
 }
 
-func homeRuntimesDir() string {
-	if home, err := os.UserHomeDir(); err == nil && home != "" {
-		return filepath.Join(home, ".local", "share", "anvil", DefaultRuntimesDir)
-	}
-	warnHomeUnsetOnce()
-	return ""
-}
-
 var (
-	homeUnsetWarnOnce    sync.Once
-	stderrWriter         io.Writer = os.Stderr // overridable in tests
-	detectPlatformFn               = DetectPlatform
-	fetchLatestReleaseFn           = FetchLatestRelease
-	fetchReleaseFn                 = FetchRelease
-	autoBuildRuntimeFn             = func(m *Manager, name, ref string, backend BuildBackend) (*RuntimeInfo, error) {
+	detectPlatformFn     = DetectPlatform
+	fetchLatestReleaseFn = FetchLatestRelease
+	fetchReleaseFn       = FetchRelease
+	autoBuildRuntimeFn   = func(m *Manager, name, ref string, backend BuildBackend) (*RuntimeInfo, error) {
 		return m.autoBuild(name, ref, backend)
 	}
+	findConfigFn  = config.FindConfig
+	loadConfigFn  = config.Load
+	userCurrentFn = user.Current
 )
 
-// warnHomeUnsetOnce emits a single stderr line when HOME is unset, so ops
-// running anvil under systemd see why the user-local runtimes path was
-// skipped. The resolution chain still falls through to /var/lib and /tmp.
-func warnHomeUnsetOnce() {
-	homeUnsetWarnOnce.Do(func() {
-		fmt.Fprintln(stderrWriter, "warning: HOME not set; skipping user-local runtimes dir. Set runtimes_dir in config or install runtimes to /var/lib/anvil/runtimes.")
-	})
-}
+func resolveRuntimesDir() (string, error) {
+	tried := make([]string, 0, 5)
 
-func runtimeDirHasEntries(dir string) bool {
-	if dir == "" {
-		return false
+	if dir, ok := configuredRuntimesDir(); ok {
+		return dir, nil
+	} else {
+		tried = append(tried, "config.runtimes_dir (unset or unreadable)")
 	}
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		return false
+
+	if dir, ok := envRuntimesDir(); ok {
+		return dir, nil
+	} else {
+		tried = append(tried, "ANVIL_RUNTIMES_DIR (unset)")
 	}
-	return len(entries) > 0
+
+	if dir, ok := homeEnvRuntimesDir(); ok {
+		return dir, nil
+	} else {
+		tried = append(tried, "$HOME/.local/share/anvil/runtimes (HOME unset)")
+	}
+
+	if dir, ok := passwdHomeRuntimesDir(); ok {
+		return dir, nil
+	} else {
+		tried = append(tried, "<passwd home>/.local/share/anvil/runtimes (unavailable)")
+	}
+
+	varLib := filepath.Join("/var/lib", "anvil", DefaultRuntimesDir)
+	if varLib != "" {
+		return varLib, nil
+	}
+
+	return "", fmt.Errorf("resolve runtimes dir: tried %s", strings.Join(tried, "; "))
 }
 
 func (m *Manager) ensureDir() error {
 	if m.runtimesDir == "" {
-		m.runtimesDir = defaultRuntimesDir()
+		dir, err := resolveRuntimesDir()
+		if err != nil {
+			return err
+		}
+		m.runtimesDir = dir
 	}
 	return os.MkdirAll(m.runtimesDir, 0o755)
+}
+
+// RuntimesDir returns the resolved runtime directory without creating it.
+func (m *Manager) RuntimesDir() (string, error) {
+	if strings.TrimSpace(m.runtimesDir) != "" {
+		return m.runtimesDir, nil
+	}
+	dir, err := resolveRuntimesDir()
+	if err != nil {
+		return "", err
+	}
+	m.runtimesDir = dir
+	return dir, nil
 }
 
 func (m *Manager) activeFilePath() string {
