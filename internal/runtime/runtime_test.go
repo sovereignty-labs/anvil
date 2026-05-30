@@ -3,13 +3,14 @@ package runtime
 import (
 	"archive/tar"
 	"archive/zip"
-	"bytes"
 	"compress/gzip"
 	"os"
+	"os/user"
 	"path/filepath"
 	"strings"
-	"sync"
 	"testing"
+
+	"github.com/sovereignty-labs/anvil/internal/config"
 )
 
 func TestDetectPlatformWithNvidiaSmi(t *testing.T) {
@@ -416,20 +417,37 @@ func TestSelectAssetPrefersCudaWhenAvailable(t *testing.T) {
 	}
 }
 
-func TestHomeRuntimesDirEmptyWhenHOMEUnset(t *testing.T) {
+func TestResolveRuntimesDirWithHOMEUnsetFallsBackToPasswdHome(t *testing.T) {
 	t.Setenv("HOME", "")
-	// Reset the once so the warning would fire if HOME is empty — but
-	// what we care about is that the function returns "" cleanly.
-	homeUnsetWarnOnce = sync.Once{}
-	var sink bytes.Buffer
-	stderrWriter = &sink
-	t.Cleanup(func() { stderrWriter = os.Stderr })
+	t.Setenv("ANVIL_RUNTIMES_DIR", "")
 
-	if got := homeRuntimesDir(); got != "" {
-		t.Errorf("homeRuntimesDir() with empty HOME = %q, want \"\"", got)
+	oldFindConfig := findConfigFn
+	oldLoadConfig := loadConfigFn
+	oldUserCurrent := userCurrentFn
+	t.Cleanup(func() {
+		findConfigFn = oldFindConfig
+		loadConfigFn = oldLoadConfig
+		userCurrentFn = oldUserCurrent
+	})
+	findConfigFn = func() string { return "" }
+	loadConfigFn = func(path string) (*config.Config, error) {
+		t.Fatalf("loadConfigFn should not be called when no config file is found; path=%s", path)
+		return nil, nil
 	}
-	if !strings.Contains(sink.String(), "HOME not set") {
-		t.Errorf("expected stderr warning, got %q", sink.String())
+	userCurrentFn = func() (*user.User, error) {
+		return &user.User{HomeDir: "/home/passwd"}, nil
+	}
+
+	got, err := resolveRuntimesDir()
+	if err != nil {
+		t.Fatalf("resolveRuntimesDir() returned error: %v", err)
+	}
+	want := filepath.Join("/home/passwd", ".local", "share", "anvil", DefaultRuntimesDir)
+	if got != want {
+		t.Fatalf("resolveRuntimesDir() = %q, want %q", got, want)
+	}
+	if strings.Contains(got, os.TempDir()) {
+		t.Fatalf("resolveRuntimesDir() fell back to temp dir: %q", got)
 	}
 }
 

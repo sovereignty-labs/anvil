@@ -11,8 +11,9 @@ import (
 )
 
 type statusResponse struct {
-	Models []statusModel `json:"models"`
-	Node   statusNode    `json:"node"`
+	Models         []statusModel   `json:"models"`
+	Node           statusNode      `json:"node"`
+	AutoloadErrors []autoloadError `json:"autoload_errors,omitempty"`
 }
 
 type statusModel struct {
@@ -38,6 +39,19 @@ type statusGPU struct {
 	VRAMFreeMB  uint64 `json:"vram_free_mb"`
 }
 
+type autoloadError struct {
+	Model string `json:"model"`
+	Alias string `json:"alias,omitempty"`
+	Error string `json:"error"`
+}
+
+type healthResponse struct {
+	Status         string          `json:"status"`
+	ModelsLoaded   int             `json:"models_loaded"`
+	Degraded       bool            `json:"degraded,omitempty"`
+	AutoloadErrors []autoloadError `json:"autoload_errors,omitempty"`
+}
+
 func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		w.Header().Set("Allow", http.MethodGet)
@@ -50,6 +64,30 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 	if err := json.NewEncoder(w).Encode(resp); err != nil {
 		s.logger.Error("encode status response failed", "error", err)
 		http.Error(w, "failed to encode status", http.StatusInternalServerError)
+	}
+}
+
+func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		w.Header().Set("Allow", http.MethodGet)
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	errors := s.autoloadErrorsSnapshot()
+	resp := healthResponse{
+		Status:       "ok",
+		ModelsLoaded: len(s.proxy.RouteStatsList()),
+	}
+	if len(errors) > 0 {
+		resp.Degraded = true
+		resp.AutoloadErrors = errors
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(resp); err != nil {
+		s.logger.Error("encode health response failed", "error", err)
+		http.Error(w, "failed to encode health", http.StatusInternalServerError)
 	}
 }
 
@@ -122,6 +160,10 @@ func (s *Server) buildStatusResponse() statusResponse {
 			PID:           proc.PID,
 			UptimeSeconds: int64(time.Since(proc.StartTime).Seconds()),
 		})
+	}
+
+	if errors := s.autoloadErrorsSnapshot(); len(errors) > 0 {
+		resp.AutoloadErrors = errors
 	}
 
 	return resp

@@ -19,8 +19,9 @@ type Client struct {
 
 // NodeStatus mirrors internal/server.statusResponse.
 type NodeStatus struct {
-	Models []StatusModel `json:"models"`
-	Node   StatusNode    `json:"node"`
+	Models         []StatusModel         `json:"models"`
+	Node           StatusNode            `json:"node"`
+	AutoloadErrors []StatusAutoloadError `json:"autoload_errors,omitempty"`
 }
 
 // StatusResponse is the public name used by callers.
@@ -50,6 +51,13 @@ type StatusGPU struct {
 	Backend     string `json:"backend,omitempty"`
 	VRAMTotalMB uint64 `json:"vram_total_mb"`
 	VRAMFreeMB  uint64 `json:"vram_free_mb"`
+}
+
+// StatusAutoloadError mirrors internal/server.autoloadError.
+type StatusAutoloadError struct {
+	Model string `json:"model"`
+	Alias string `json:"alias,omitempty"`
+	Error string `json:"error"`
 }
 
 // LoadRequest mirrors internal/server.loadRequest.

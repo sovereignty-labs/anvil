@@ -68,3 +68,36 @@ func TestModelGPUNameBackCompatWithEmptyBackend(t *testing.T) {
 		t.Fatalf("modelVRAM(rocm:0) = %q, want 14.6/15.6GB", got)
 	}
 }
+
+func TestBuildStatusRowsIncludesAutoloadErrors(t *testing.T) {
+	resp := &federation.StatusResponse{
+		Models: []federation.StatusModel{{
+			Name:          "gpu-host.gguf",
+			Alias:         "gpu-host",
+			Port:          11435,
+			GPU:           "cpu",
+			PID:           1234,
+			UptimeSeconds: 61,
+		}},
+		AutoloadErrors: []federation.StatusAutoloadError{{
+			Model: "turbo.gguf",
+			Alias: "turbo",
+			Error: `runtime "turbo" not found in /var/lib/anvil/runtimes`,
+		}},
+	}
+
+	rows := buildStatusRows("local", resp)
+	if len(rows) != 2 {
+		t.Fatalf("rows len = %d, want 2", len(rows))
+	}
+
+	if rows[1].GPU != "ERROR" {
+		t.Fatalf("autoload error row GPU = %q, want ERROR", rows[1].GPU)
+	}
+	if rows[1].Model != "turbo.gguf" || rows[1].Alias != "turbo" {
+		t.Fatalf("unexpected autoload error row: %+v", rows[1])
+	}
+	if rows[1].Uptime != `runtime "turbo" not found in /var/lib/anvil/runtimes` {
+		t.Fatalf("autoload error row message = %q", rows[1].Uptime)
+	}
+}

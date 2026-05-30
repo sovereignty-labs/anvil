@@ -481,13 +481,17 @@ func (s *Server) resolveLlamaServerPathAndBackend() (string, runtimemgr.BuildBac
 	}
 
 	mgr := runtimemgr.NewManager()
+	runtimesDir, dirErr := mgr.RuntimesDir()
+	if dirErr != nil {
+		return "", runtimemgr.BuildBackendCUDA, dirErr
+	}
 	activeName, err := mgr.ActiveName()
 	if err != nil {
 		return "", runtimemgr.BuildBackendCUDA, err
 	}
 	path, err := mgr.Resolve()
 	if err != nil {
-		return "", runtimemgr.BuildBackendCUDA, err
+		return "", runtimemgr.BuildBackendCUDA, fmt.Errorf("active runtime %q not found in %s: %w", activeName, runtimesDir, err)
 	}
 	return path, mgr.RuntimeBackend(activeName), nil
 }

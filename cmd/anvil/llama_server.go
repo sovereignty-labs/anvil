@@ -22,9 +22,13 @@ func resolveLlamaServerPathWithRuntime(cmd *cobra.Command, cfg *config.Config, r
 
 	if runtimeName = strings.TrimSpace(runtimeName); runtimeName != "" {
 		mgr := runtimemgr.NewManager()
+		runtimesDir, dirErr := mgr.RuntimesDir()
+		if dirErr != nil {
+			return "", runtimemgr.BuildBackendCUDA, dirErr
+		}
 		path, err := mgr.ResolveNamed(runtimeName)
 		if err != nil {
-			return "", runtimemgr.BuildBackendCUDA, err
+			return "", runtimemgr.BuildBackendCUDA, fmt.Errorf("runtime %q not found in %s: %w", runtimeName, runtimesDir, err)
 		}
 		return path, mgr.RuntimeBackend(runtimeName), nil
 	}
@@ -50,6 +54,10 @@ func resolveLlamaServerPathWithRuntime(cmd *cobra.Command, cfg *config.Config, r
 	}
 
 	mgr := runtimemgr.NewManager()
+	runtimesDir, dirErr := mgr.RuntimesDir()
+	if dirErr != nil {
+		return "", runtimemgr.BuildBackendCUDA, dirErr
+	}
 	activeName, err := mgr.ActiveName()
 	if err != nil {
 		return "", runtimemgr.BuildBackendCUDA, err
@@ -59,7 +67,7 @@ func resolveLlamaServerPathWithRuntime(cmd *cobra.Command, cfg *config.Config, r
 		return path, mgr.RuntimeBackend(activeName), nil
 	}
 
-	return "", runtimemgr.BuildBackendCUDA, fmt.Errorf("no llama-server found. Run `anvil runtime install` or set --llama-server")
+	return "", runtimemgr.BuildBackendCUDA, fmt.Errorf("no llama-server found in %s. Run `anvil runtime install` or set --llama-server", runtimesDir)
 }
 
 func getRuntimeFlag(cmd *cobra.Command) string {
