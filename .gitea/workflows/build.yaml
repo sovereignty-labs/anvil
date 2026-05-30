@@ -2,6 +2,13 @@ name: Build and Push
 on:
   push:
     branches: [main]
+    paths-ignore:
+      - '**.md'
+      - 'LICENSE'
+      - 'systemd/**'
+      - 'configs/**'
+      - 'docs/**'
+      - '.gitignore'
     tags: ['v*']
 env:
   REGISTRY_USER: ${{ secrets.REGISTRY_USER }}
