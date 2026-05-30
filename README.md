@@ -12,17 +12,39 @@ Ollama opened local LLMs to a generation of people, then drifted into a blob sto
 # Install anvil
 curl -fsSL https://raw.githubusercontent.com/sovereignty-labs/anvil/main/install.sh | sh
 
-# Install llama-server (auto-detects your GPU and builds with CUDA/ROCm/Metal)
+# Install llama-server as the user who will run the service
 anvil runtime install
 
 # Pull a model from HuggingFace
 anvil pull unsloth/Qwen3.6-35B-A3B-GGUF:UD-IQ3_S
 
-# Run it
+# Run it directly if you are not using systemd
 anvil load Qwen3.6-35B-A3B-UD-IQ3_S.gguf
 ```
 
 That's it. Your model is serving on `http://localhost:11434/v1` - OpenAI-compatible, works with any client.
+
+## Run Under systemd
+
+The service user is the source of truth for runtime lookup. If you installed runtimes as your own user, run the service as that same user so anvil resolves `~/.local/share/anvil/runtimes`.
+
+```bash
+# Copy the example unit into place
+sudo cp systemd/anvil.service /etc/systemd/system/anvil.service
+
+# Edit these lines in /etc/systemd/system/anvil.service:
+# User=CHANGE_ME
+# Group=CHANGE_ME
+```
+
+Set `User=` and `Group=` to the user that ran `anvil runtime install`, then start the service:
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable --now anvil
+```
+
+If `anvil status` shows an `ERROR` row saying a runtime wasn't found in `/root/...`, the service is running as root but your runtimes are in your home. Set `User=` in the unit.
 
 ## Which model should I run?
 
