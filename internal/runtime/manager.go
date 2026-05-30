@@ -16,7 +16,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/sovereignty-labs/nollama/internal/config"
+	"github.com/sovereignty-labs/anvil/internal/config"
 )
 
 const (
@@ -41,7 +41,7 @@ type Manager struct {
 	runtimesDir string
 }
 
-// NewManager returns a manager rooted at ~/.local/share/nollama/runtimes/.
+// NewManager returns a manager rooted at ~/.local/share/anvil/runtimes/.
 func NewManager() *Manager {
 	dir := defaultRuntimesDir()
 	_ = os.MkdirAll(dir, 0o755)
@@ -53,7 +53,7 @@ func defaultRuntimesDir() string {
 		return dir
 	}
 
-	varLib := filepath.Join("/var/lib", "nollama", DefaultRuntimesDir)
+	varLib := filepath.Join("/var/lib", "anvil", DefaultRuntimesDir)
 	home := homeRuntimesDir()
 
 	if runtimeDirHasEntries(varLib) {
@@ -68,7 +68,7 @@ func defaultRuntimesDir() string {
 	if home != "" {
 		return home
 	}
-	return filepath.Join(os.TempDir(), "nollama", DefaultRuntimesDir)
+	return filepath.Join(os.TempDir(), "anvil", DefaultRuntimesDir)
 }
 
 func configuredRuntimesDir() string {
@@ -92,7 +92,7 @@ func configuredRuntimesDir() string {
 
 func homeRuntimesDir() string {
 	if home, err := os.UserHomeDir(); err == nil && home != "" {
-		return filepath.Join(home, ".local", "share", "nollama", DefaultRuntimesDir)
+		return filepath.Join(home, ".local", "share", "anvil", DefaultRuntimesDir)
 	}
 	warnHomeUnsetOnce()
 	return ""
@@ -110,11 +110,11 @@ var (
 )
 
 // warnHomeUnsetOnce emits a single stderr line when HOME is unset, so ops
-// running nollama under systemd see why the user-local runtimes path was
+// running anvil under systemd see why the user-local runtimes path was
 // skipped. The resolution chain still falls through to /var/lib and /tmp.
 func warnHomeUnsetOnce() {
 	homeUnsetWarnOnce.Do(func() {
-		fmt.Fprintln(stderrWriter, "warning: HOME not set; skipping user-local runtimes dir. Set runtimes_dir in config or install runtimes to /var/lib/nollama/runtimes.")
+		fmt.Fprintln(stderrWriter, "warning: HOME not set; skipping user-local runtimes dir. Set runtimes_dir in config or install runtimes to /var/lib/anvil/runtimes.")
 	})
 }
 
@@ -281,8 +281,8 @@ func (m *Manager) Install(version string, noPrebuilt, noBuild bool) (*RuntimeInf
 func warnNoPrebuiltBinary(backend BuildBackend) {
 	fmt.Fprintf(os.Stderr, "Warning: %s detected but no %s build available for this platform in this release.\n", backendDisplayName(backend), backendDisplayName(backend))
 	fmt.Fprintln(os.Stderr, "  The downloaded runtime is CPU-only.")
-	fmt.Fprintln(os.Stderr, "  For GPU acceleration, run: nollama runtime build")
-	fmt.Fprintf(os.Stderr, "  Or compile llama.cpp with %s and use: nollama runtime add <name> /path/to/llama-server\n", backendDisplayName(backend))
+	fmt.Fprintln(os.Stderr, "  For GPU acceleration, run: anvil runtime build")
+	fmt.Fprintf(os.Stderr, "  Or compile llama.cpp with %s and use: anvil runtime add <name> /path/to/llama-server\n", backendDisplayName(backend))
 }
 
 // BuildOpts configures a from-source runtime build.
@@ -334,7 +334,7 @@ func (m *Manager) Build(opts BuildOpts) (*RuntimeInfo, error) {
 		}
 	}
 
-	srcDir, err := os.MkdirTemp("", "nollama-build-")
+	srcDir, err := os.MkdirTemp("", "anvil-build-")
 	if err != nil {
 		return nil, fmt.Errorf("create build temp dir: %w", err)
 	}
@@ -646,7 +646,7 @@ func (m *Manager) Resolve() (string, error) {
 		return "", err
 	}
 	if activeName == "" {
-		return "", fmt.Errorf("no active runtime found. Run `nollama runtime install` or `nollama runtime use <name>`")
+		return "", fmt.Errorf("no active runtime found. Run `anvil runtime install` or `anvil runtime use <name>`")
 	}
 
 	bin, ok, err := m.findBinary(filepath.Join(m.runtimesDir, activeName))

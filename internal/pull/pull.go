@@ -358,7 +358,7 @@ func formatAmbiguousError(spec PullSpec, matches []GGUFFile) error {
 	for _, file := range matches {
 		fmt.Fprintf(&b, "  %-9s %-40s (%s)\n", GuessQuantFromFilename(file.Name), file.Name, humanSize(file.Size))
 	}
-	fmt.Fprintf(&b, "\nBe more specific: nollama pull %s/%s:%s", spec.Org, spec.Repo, GuessQuantFromFilename(matches[0].Name))
+	fmt.Fprintf(&b, "\nBe more specific: anvil pull %s/%s:%s", spec.Org, spec.Repo, GuessQuantFromFilename(matches[0].Name))
 	return errors.New(strings.TrimRight(b.String(), "\n"))
 }
 

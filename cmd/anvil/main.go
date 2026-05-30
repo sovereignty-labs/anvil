@@ -15,13 +15,13 @@ import (
 	"text/tabwriter"
 	"time"
 
-	"github.com/sovereignty-labs/nollama/internal/config"
-	"github.com/sovereignty-labs/nollama/internal/federation"
-	"github.com/sovereignty-labs/nollama/internal/hardware"
-	"github.com/sovereignty-labs/nollama/internal/model"
-	"github.com/sovereignty-labs/nollama/internal/process"
-	runtimemgr "github.com/sovereignty-labs/nollama/internal/runtime"
-	"github.com/sovereignty-labs/nollama/internal/version"
+	"github.com/sovereignty-labs/anvil/internal/config"
+	"github.com/sovereignty-labs/anvil/internal/federation"
+	"github.com/sovereignty-labs/anvil/internal/hardware"
+	"github.com/sovereignty-labs/anvil/internal/model"
+	"github.com/sovereignty-labs/anvil/internal/process"
+	runtimemgr "github.com/sovereignty-labs/anvil/internal/runtime"
+	"github.com/sovereignty-labs/anvil/internal/version"
 	"github.com/spf13/cobra"
 )
 
@@ -33,11 +33,11 @@ func main() {
 }
 
 var rootCmd = &cobra.Command{
-	Use:   "nollama",
-	Short: "The model runner Ollama should have been",
-	Long: `nollama — One Go binary. Plain GGUFs. Transparent llama-server under the hood.
+	Use:   "anvil",
+	Short: "Run models on your own iron.",
+	Long: `anvil — One Go binary. Plain GGUFs. Transparent llama-server under the hood.
 
-nollama manages llama-server processes with smart defaults derived from GGUF
+anvil manages llama-server processes with smart defaults derived from GGUF
 metadata and hardware detection. Zero inference overhead. Plain files.
 No blob store. No proprietary formats. No cloud.
 
@@ -58,7 +58,7 @@ With --dry-run, prints the computed flags and device selection reasoning
 without actually launching llama-server.
 
 Pass arbitrary llama-server flags after '--':
-  nollama load model.gguf -- --ctx-size 131072 --parallel 4`,
+  anvil load model.gguf -- --ctx-size 131072 --parallel 4`,
 	Args: exactPositionalArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return runLoad(cmd, args)
@@ -68,7 +68,7 @@ Pass arbitrary llama-server flags after '--':
 // exactPositionalArgs validates that the command has exactly n positional
 // args BEFORE a `--` separator, ignoring anything after `--`. cobra.ExactArgs
 // counts post-dash tokens as positionals and rejects them; this lets users
-// write `nollama load model.gguf -- --ctx-size 32768` as the help text
+// write `anvil load model.gguf -- --ctx-size 32768` as the help text
 // promises.
 func exactPositionalArgs(n int) cobra.PositionalArgs {
 	return func(cmd *cobra.Command, args []string) error {
@@ -190,7 +190,7 @@ func runUnload(cmd *cobra.Command, args []string) error {
 var statusCmd = &cobra.Command{
 	Use:   "status",
 	Short: "Show loaded models and their llama-server processes",
-	Long:  "Show all llama-server processes managed by nollama with model name, port, GPU, PID, and uptime.",
+	Long:  "Show all llama-server processes managed by anvil with model name, port, GPU, PID, and uptime.",
 	RunE:  runStatus,
 }
 
@@ -216,7 +216,7 @@ var runtimeInstallCmd = &cobra.Command{
 	RunE:  runRuntimeInstall,
 }
 
-// runtimeBuildCmd is wired up in cmd/nollama/runtime.go's init so its
+// runtimeBuildCmd is wired up in cmd/anvil/runtime.go's init so its
 // flags + RunE live next to the other runtime subcommands.
 var runtimeBuildCmd = &cobra.Command{
 	Use: "build",
@@ -246,12 +246,12 @@ var runtimeAddCmd = &cobra.Command{
 
 var remoteCmd = &cobra.Command{
 	Use:   "remote",
-	Short: "Manage remote nollama nodes (federation)",
+	Short: "Manage remote anvil nodes (federation)",
 }
 
 var remoteAddCmd = &cobra.Command{
 	Use:   "add <name> <url>",
-	Short: "Register a remote nollama node",
+	Short: "Register a remote anvil node",
 	Args:  cobra.ExactArgs(2),
 	RunE:  runRemoteAdd,
 }
@@ -587,7 +587,7 @@ func runRemoteList(_ *cobra.Command, _ []string) error {
 
 	merged := federation.MergeRemotes(registry, cfgRemotes)
 	if len(merged) == 0 {
-		fmt.Println("No remotes registered. Add one: nollama remote add <name> <url>")
+		fmt.Println("No remotes registered. Add one: anvil remote add <name> <url>")
 		return nil
 	}
 
@@ -612,7 +612,7 @@ func runRemotePing(_ *cobra.Command, _ []string) error {
 
 	merged := federation.MergeRemotes(registry, cfgRemotes)
 	if len(merged) == 0 {
-		fmt.Println("No remotes registered. Add one: nollama remote add <name> <url>")
+		fmt.Println("No remotes registered. Add one: anvil remote add <name> <url>")
 		return nil
 	}
 
@@ -921,7 +921,7 @@ func reportCopyProgress(done <-chan struct{}, filename string, total int64, read
 func init() {
 	// Root-level persistent flags
 	rootCmd.PersistentFlags().String("node", "", "Target a specific remote node")
-	rootCmd.PersistentFlags().String("llama-server", "", "Path to llama-server binary (required; also checked via NOLLAMA_LLAMA_SERVER env var)")
+	rootCmd.PersistentFlags().String("llama-server", "", "Path to llama-server binary (required; also checked via ANVIL_LLAMA_SERVER env var)")
 
 	// rootCmd.Version is set to version.String(); customize the template so
 	// `--version` prints just that string, without cobra's "name version <X>" wrap.

@@ -7,9 +7,9 @@ import (
 	"strings"
 
 	mcpsrv "github.com/mark3labs/mcp-go/server"
-	"github.com/sovereignty-labs/nollama/internal/config"
-	"github.com/sovereignty-labs/nollama/internal/federation"
-	"github.com/sovereignty-labs/nollama/internal/version"
+	"github.com/sovereignty-labs/anvil/internal/config"
+	"github.com/sovereignty-labs/anvil/internal/federation"
+	"github.com/sovereignty-labs/anvil/internal/version"
 )
 
 // Runner owns the MCP server lifecycle.
@@ -39,7 +39,7 @@ func NewRunner(cfg *config.Config, registryPath string) *Runner {
 		localBaseURL: managementBaseURL(cfg.Bind),
 	}
 	r.server = mcpsrv.NewMCPServer(
-		"nollama",
+		"anvil",
 		version.Version,
 		mcpsrv.WithToolCapabilities(true),
 	)

@@ -256,7 +256,7 @@ func (m *Manager) autoBuild(name, ref string, backend BuildBackend) (*RuntimeInf
 		return nil, err
 	}
 
-	srcDir, err := os.MkdirTemp("", "nollama-build-")
+	srcDir, err := os.MkdirTemp("", "anvil-build-")
 	if err != nil {
 		return nil, fmt.Errorf("create build temp dir: %w", err)
 	}

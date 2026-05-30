@@ -16,7 +16,7 @@ func isolateModelDirs(t *testing.T) string {
 	t.Setenv("HOME", home)
 	t.Setenv("XDG_DATA_HOME", "")
 	t.Setenv("XDG_CONFIG_HOME", "")
-	defaultDir := filepath.Join(home, ".local", "share", "nollama", "models")
+	defaultDir := filepath.Join(home, ".local", "share", "anvil", "models")
 	if err := os.MkdirAll(defaultDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -108,7 +108,7 @@ func TestResolveModelPathNotFoundListsSearched(t *testing.T) {
 	if !strings.Contains(msg, defaultDir) {
 		t.Errorf("error should list default dir %q, got %q", defaultDir, msg)
 	}
-	if !strings.Contains(msg, "nollama pull") {
+	if !strings.Contains(msg, "anvil pull") {
 		t.Errorf("error should hint about pull, got %q", msg)
 	}
 }

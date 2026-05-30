@@ -13,11 +13,11 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/sovereignty-labs/nollama/internal/config"
-	"github.com/sovereignty-labs/nollama/internal/hardware"
-	"github.com/sovereignty-labs/nollama/internal/model"
-	"github.com/sovereignty-labs/nollama/internal/process"
-	runtimemgr "github.com/sovereignty-labs/nollama/internal/runtime"
+	"github.com/sovereignty-labs/anvil/internal/config"
+	"github.com/sovereignty-labs/anvil/internal/hardware"
+	"github.com/sovereignty-labs/anvil/internal/model"
+	"github.com/sovereignty-labs/anvil/internal/process"
+	runtimemgr "github.com/sovereignty-labs/anvil/internal/runtime"
 	"github.com/spf13/cobra"
 )
 
@@ -27,13 +27,13 @@ var runModelCmd = &cobra.Command{
 	Long: `Load a model and start an interactive chat session.
 
 The model can be a bare filename, a path, or a name without .gguf extension.
-If nollama serve is running and the model is already loaded, run connects
+If anvil serve is running and the model is already loaded, run connects
 through the proxy instead of spawning a second instance.
 
 Examples:
-  nollama run google_gemma-4-E2B-it-Q4_K_M
-  nollama run ~/models/my-model.gguf
-  nollama run Qwen3-4B-Q4_K_M --gpu 0`,
+  anvil run google_gemma-4-E2B-it-Q4_K_M
+  anvil run ~/models/my-model.gguf
+  anvil run Qwen3-4B-Q4_K_M --gpu 0`,
 	Args: exactPositionalArgs(1),
 	RunE: runRunModel,
 }
@@ -60,7 +60,7 @@ func runRunModel(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	// If nollama serve is running and already hosts this model, route the chat
+	// If anvil serve is running and already hosts this model, route the chat
 	// through its proxy and skip spawning a second instance.
 	if endpoint, ok := findDaemonEndpointForModel(cfg, modelName); ok {
 		fmt.Fprintf(os.Stderr, "Connecting to running daemon: %s\n", endpoint)
@@ -199,7 +199,7 @@ func runChatAgainst(endpoint, modelName string, ownedProcess bool) error {
 	}
 }
 
-// findDaemonEndpointForModel asks nollama serve (at cfg.Bind, or the default
+// findDaemonEndpointForModel asks anvil serve (at cfg.Bind, or the default
 // 127.0.0.1:11434) whether modelName is already loaded. Returns the daemon's
 // base URL when so; otherwise (no daemon, daemon reachable but model absent)
 // reports false.
@@ -247,7 +247,7 @@ func findDaemonEndpointForModel(cfg *config.Config, modelName string) (string, b
 
 // waitForReady polls /health every 500ms until it returns 200, or until
 // timeout elapses. Prints a single ticking spinner so the user knows
-// nollama is alive while a big model loads into VRAM.
+// anvil is alive while a big model loads into VRAM.
 func waitForReady(endpoint string, timeout time.Duration) error {
 	deadline := time.Now().Add(timeout)
 	client := &http.Client{Timeout: 1 * time.Second}
@@ -292,7 +292,7 @@ func printLogTail(logDir string, port, n int) {
 }
 
 // modelStem strips a trailing .gguf so the model name sent in chat requests
-// matches what llama-server / nollamas /v1/models advertises.
+// matches what llama-server / anvils /v1/models advertises.
 func modelStem(name string) string {
 	return strings.TrimSuffix(name, ".gguf")
 }

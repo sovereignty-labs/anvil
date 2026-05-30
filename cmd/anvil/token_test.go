@@ -8,7 +8,7 @@ import (
 )
 
 // sandboxTokenHome points XDG_CONFIG_HOME and HOME at a tempdir so the
-// resolver/writer don't touch the developer's real ~/.config/nollama/token.
+// resolver/writer don't touch the developer's real ~/.config/anvil/token.
 func sandboxTokenHome(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()

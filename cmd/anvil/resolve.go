@@ -6,18 +6,18 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/sovereignty-labs/nollama/internal/config"
+	"github.com/sovereignty-labs/anvil/internal/config"
 )
 
 // resolveModelPath resolves a bare filename (no path separator) against the
 // known model directories so users can refer to models pulled into the default
 // store by name alone:
 //
-//	nollama load google_gemma-4-E2B-it-Q4_K_M.gguf
-//	nollama inspect google_gemma-4-E2B-it-Q4_K_M       # .gguf auto-appended
+//	anvil load google_gemma-4-E2B-it-Q4_K_M.gguf
+//	anvil inspect google_gemma-4-E2B-it-Q4_K_M       # .gguf auto-appended
 //
 // Search order: current working directory → config.ModelDir → default
-// (~/.local/share/nollama/models). The first existing file wins. Paths that
+// (~/.local/share/anvil/models). The first existing file wins. Paths that
 // contain a separator or are absolute are returned untouched.
 func resolveModelPath(path string) (string, error) {
 	if filepath.IsAbs(path) || strings.ContainsRune(path, os.PathSeparator) {
@@ -67,6 +67,6 @@ func resolveModelPath(path string) (string, error) {
 		searched = append(searched, defaultDir)
 	}
 
-	return "", fmt.Errorf("model not found: %s\nSearched: %s\nPull a model with: nollama pull <org>/<repo>:<quant>",
+	return "", fmt.Errorf("model not found: %s\nSearched: %s\nPull a model with: anvil pull <org>/<repo>:<quant>",
 		path, strings.Join(searched, ", "))
 }

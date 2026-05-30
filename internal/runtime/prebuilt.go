@@ -14,7 +14,7 @@ import (
 	"strings"
 )
 
-var sovereigntyLabsReleasesURL = "https://api.github.com/repos/sovereignty-labs/nollama/releases"
+var sovereigntyLabsReleasesURL = "https://api.github.com/repos/sovereignty-labs/anvil/releases"
 
 var errPrebuiltRuntimeNotFound = errors.New("prebuilt runtime not found")
 
@@ -260,7 +260,7 @@ func readRuntimeManifest(path string) (*prebuiltRuntimeManifest, error) {
 }
 
 func validatePrebuiltRuntimeBundle(dir, releaseTag string, platform Platform, backend BuildBackend) error {
-	manifest, err := readRuntimeManifest(filepath.Join(dir, "nollama-runtime.json"))
+	manifest, err := readRuntimeManifest(filepath.Join(dir, "anvil-runtime.json"))
 	if err != nil {
 		return err
 	}

@@ -24,8 +24,8 @@ Results are sorted by download count (most popular first), and quantization
 variants are listed for each repo.
 
 Examples:
-  nollama search gemma 4 e2b
-  nollama search qwen 4b`,
+  anvil search gemma 4 e2b
+  anvil search qwen 4b`,
 	Args: cobra.MinimumNArgs(1),
 	RunE: runSearch,
 }
@@ -130,7 +130,7 @@ func renderSearchResults(w io.Writer, results []hfModel) {
 	}
 	_ = tw.Flush()
 	fmt.Fprintln(w)
-	fmt.Fprintln(w, "Pull with: nollama pull <repo>:<quant>")
+	fmt.Fprintln(w, "Pull with: anvil pull <repo>:<quant>")
 }
 
 // extractQuants scans GGUF filenames and returns a sorted, deduplicated list

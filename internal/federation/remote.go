@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/sovereignty-labs/nollama/internal/config"
+	"github.com/sovereignty-labs/anvil/internal/config"
 	"gopkg.in/yaml.v3"
 )
 
@@ -28,12 +28,12 @@ type RemoteRegistry struct {
 // DefaultRegistryPath returns the default CLI registry path.
 func DefaultRegistryPath() string {
 	if xdg := os.Getenv("XDG_CONFIG_HOME"); xdg != "" {
-		return filepath.Join(xdg, "nollama", "remotes.yaml")
+		return filepath.Join(xdg, "anvil", "remotes.yaml")
 	}
 	if home, err := os.UserHomeDir(); err == nil && home != "" {
-		return filepath.Join(home, ".config", "nollama", "remotes.yaml")
+		return filepath.Join(home, ".config", "anvil", "remotes.yaml")
 	}
-	return filepath.Join(".config", "nollama", "remotes.yaml")
+	return filepath.Join(".config", "anvil", "remotes.yaml")
 }
 
 // LoadRegistry loads a registry from disk. Missing files yield an empty registry.

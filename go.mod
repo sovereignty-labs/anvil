@@ -1,4 +1,4 @@
-module github.com/sovereignty-labs/nollama
+module github.com/sovereignty-labs/anvil
 
 go 1.25.5
 

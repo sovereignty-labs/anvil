@@ -138,7 +138,7 @@ func TestRenderSearchResultsContainsQuantsAndPullHint(t *testing.T) {
 	if !strings.Contains(got, "1,234") {
 		t.Errorf("downloads not formatted with commas, got %q", got)
 	}
-	if !strings.Contains(got, "nollama pull") {
+	if !strings.Contains(got, "anvil pull") {
 		t.Errorf("missing pull hint, got %q", got)
 	}
 }

@@ -1,24 +1,24 @@
-# nollama.yaml — Example configuration
+# anvil.yaml — Example configuration
 #
-# Config is optional. nollama works with zero config:
-#   nollama serve → nollama load model.gguf
+# Config is optional. anvil works with zero config:
+#   anvil serve → anvil load model.gguf
 #
 # This file pre-defines what to load on startup and sets fleet-level defaults.
 #
 # Default locations:
-#   ~/.config/nollama/config.yaml
-#   /etc/nollama/config.yaml
+#   ~/.config/anvil/config.yaml
+#   /etc/anvil/config.yaml
 #
 # Or specify explicitly:
-#   nollama serve --config /path/to/config.yaml
+#   anvil serve --config /path/to/config.yaml
 #
-# Reload without restart: kill -HUP $(pidof nollama)
+# Reload without restart: kill -HUP $(pidof anvil)
 
 # Where GGUFs live on this machine
 model_dir: /mnt/models/gguf
 
 # Where the llama-server binary lives
-# Managed by `nollama runtime` commands. Override to point at a custom binary.
+# Managed by `anvil runtime` commands. Override to point at a custom binary.
 # llama_server: /opt/llama.cpp/build/bin/llama-server
 
 # Listen address for the unified API endpoint

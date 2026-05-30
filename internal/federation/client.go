@@ -11,7 +11,7 @@ import (
 	"time"
 )
 
-// Client talks to a remote nollama management API.
+// Client talks to a remote anvil management API.
 type Client struct {
 	BaseURL    string
 	HTTPClient *http.Client

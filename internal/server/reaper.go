@@ -4,7 +4,7 @@ import (
 	"context"
 	"time"
 
-	"github.com/sovereignty-labs/nollama/internal/config"
+	"github.com/sovereignty-labs/anvil/internal/config"
 )
 
 // idleReaperTickInterval is how often the reaper wakes up to scan for idle

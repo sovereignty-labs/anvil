@@ -202,7 +202,7 @@ func TestLoadInvalidYAML(t *testing.T) {
 
 func TestFindConfigNoFile(t *testing.T) {
 	// With no config files at standard locations, should return empty
-	// This test assumes the test environment doesn't have nollama configs
+	// This test assumes the test environment doesn't have anvil configs
 	// which is a reasonable assumption
 	path := FindConfig()
 	// We can't assert empty because the test machine might have one,

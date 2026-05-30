@@ -1,10 +1,10 @@
-# nollama config - Multi-GPU example
+# anvil config - Multi-GPU example
 #
 # Hardware: 2x NVIDIA GPUs (24GB + 16GB)
 #
 # Deploy:
-#   cp multi-gpu.yaml /etc/nollama/config.yaml
-#   nollama serve --config /etc/nollama/config.yaml
+#   cp multi-gpu.yaml /etc/anvil/config.yaml
+#   anvil serve --config /etc/anvil/config.yaml
 
 model_dir: /mnt/models
 

@@ -7,9 +7,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sovereignty-labs/nollama/internal/hardware"
-	"github.com/sovereignty-labs/nollama/internal/model"
-	runtimemgr "github.com/sovereignty-labs/nollama/internal/runtime"
+	"github.com/sovereignty-labs/anvil/internal/hardware"
+	"github.com/sovereignty-labs/anvil/internal/model"
+	runtimemgr "github.com/sovereignty-labs/anvil/internal/runtime"
 )
 
 func writeTestGGUF(t *testing.T, dir string, name string, fileSizeBytes int64, kvs []modelTestKV) (string, *model.GGUFMetadata) {
@@ -816,15 +816,15 @@ func TestComputeFlags_AbsolutePath_EnvVar(t *testing.T) {
 		{"general.file_type", uint32(15)},
 	})
 
-	os.Setenv("NOLLAMA_LLAMA_SERVER", "/opt/llama/bin/llama-server")
-	defer os.Unsetenv("NOLLAMA_LLAMA_SERVER")
+	os.Setenv("ANVIL_LLAMA_SERVER", "/opt/llama/bin/llama-server")
+	defer os.Unsetenv("ANVIL_LLAMA_SERVER")
 
 	inv := &hardware.Inventory{
 		GPUs: []hardware.GPU{{Index: 0, VRAMTotal: 24576, VRAMFree: 20000}},
 		CPU:  hardware.CPU{Cores: 8},
 	}
 
-	result, err := ComputeFlags(meta, modelPath, inv, os.Getenv("NOLLAMA_LLAMA_SERVER"), 0)
+	result, err := ComputeFlags(meta, modelPath, inv, os.Getenv("ANVIL_LLAMA_SERVER"), 0)
 	if err != nil {
 		t.Fatalf("ComputeFlags error: %v", err)
 	}

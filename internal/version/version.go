@@ -12,9 +12,9 @@ var (
 
 // String returns a human-readable build identifier suitable for `--version`
 // output. Handles three cases:
-//   - All three set: "nollama v0.1.0 (abc1234) built 2026-05-19T12:00:00Z"
-//   - Version unset/dev, commit + date set: "nollama dev (abc1234) built ..."
-//   - Nothing meaningful: "nollama dev (unknown)"
+//   - All three set: "anvil v0.1.0 (abc1234) built 2026-05-19T12:00:00Z"
+//   - Version unset/dev, commit + date set: "anvil dev (abc1234) built ..."
+//   - Nothing meaningful: "anvil dev (unknown)"
 func String() string {
 	v := Version
 	if v == "" {
@@ -31,7 +31,7 @@ func String() string {
 
 	// "All empty" sentinel: commit + date both at defaults, version dev.
 	if v == "dev" && commit == "none" && date == "unknown" {
-		return "nollama dev (unknown)"
+		return "anvil dev (unknown)"
 	}
 
 	// Version-known path drops the leading "v" duplication when the tag
@@ -42,7 +42,7 @@ func String() string {
 	}
 
 	if v == "dev" {
-		return fmt.Sprintf("nollama dev (%s) built %s", commit, date)
+		return fmt.Sprintf("anvil dev (%s) built %s", commit, date)
 	}
-	return fmt.Sprintf("nollama %s (%s) built %s", prefix, commit, date)
+	return fmt.Sprintf("anvil %s (%s) built %s", prefix, commit, date)
 }

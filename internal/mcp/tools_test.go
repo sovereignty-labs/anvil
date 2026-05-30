@@ -13,8 +13,8 @@ import (
 	"testing"
 
 	mcpkit "github.com/mark3labs/mcp-go/mcp"
-	"github.com/sovereignty-labs/nollama/internal/config"
-	"github.com/sovereignty-labs/nollama/internal/model"
+	"github.com/sovereignty-labs/anvil/internal/config"
+	"github.com/sovereignty-labs/anvil/internal/model"
 )
 
 func TestToolStatusAggregatesLocalAndRemote(t *testing.T) {
@@ -42,7 +42,7 @@ func TestToolStatusAggregatesLocalAndRemote(t *testing.T) {
 	}
 
 	runner := NewRunner(cfg, filepath.Join(t.TempDir(), "remotes.yaml"))
-	statusRes, err := runner.toolStatus(context.Background(), callTool("nollama_status", nil))
+	statusRes, err := runner.toolStatus(context.Background(), callTool("anvil_status", nil))
 	text := mustToolText(t, statusRes, err)
 	if !strings.Contains(text, "local") || !strings.Contains(text, "gpu-host") {
 		t.Fatalf("status output missing node labels:\n%s", text)
@@ -113,7 +113,7 @@ func TestToolLoadUnloadModelsPullAndRm(t *testing.T) {
 
 	runner := NewRunner(cfg, filepath.Join(t.TempDir(), "remotes.yaml"))
 
-	loadRes, err := runner.toolLoad(context.Background(), callTool("nollama_load", map[string]any{
+	loadRes, err := runner.toolLoad(context.Background(), callTool("anvil_load", map[string]any{
 		"model": "gpu-host.gguf",
 		"gpu":   0,
 		"flags": map[string]any{"ctx-size": 8192},
@@ -123,7 +123,7 @@ func TestToolLoadUnloadModelsPullAndRm(t *testing.T) {
 	}
 	assertTextContains(t, loadRes, "Loaded model gpu-host.gguf")
 
-	unloadRes, err := runner.toolUnload(context.Background(), callTool("nollama_unload", map[string]any{
+	unloadRes, err := runner.toolUnload(context.Background(), callTool("anvil_unload", map[string]any{
 		"model": "gpu-host.gguf",
 	}))
 	if err != nil {
@@ -131,14 +131,14 @@ func TestToolLoadUnloadModelsPullAndRm(t *testing.T) {
 	}
 	assertTextContains(t, unloadRes, "Unloaded model gpu-host.gguf")
 
-	modelsRes, err := runner.toolModels(context.Background(), callTool("nollama_models", nil))
+	modelsRes, err := runner.toolModels(context.Background(), callTool("anvil_models", nil))
 	if err != nil {
 		t.Fatal(err)
 	}
 	assertTextContains(t, modelsRes, "MODEL")
 	assertTextContains(t, modelsRes, "local-Q8_K_XL")
 
-	pullRes, err := runner.toolPull(context.Background(), callTool("nollama_pull", map[string]any{
+	pullRes, err := runner.toolPull(context.Background(), callTool("anvil_pull", map[string]any{
 		"spec": "unsloth/Qwen3.6-35B-A3B-GGUF:Q4_K_S",
 	}))
 	if err != nil {
@@ -146,7 +146,7 @@ func TestToolLoadUnloadModelsPullAndRm(t *testing.T) {
 	}
 	assertTextContains(t, pullRes, "Pulled gpu-host.gguf")
 
-	rmRes, err := runner.toolRm(context.Background(), callTool("nollama_rm", map[string]any{
+	rmRes, err := runner.toolRm(context.Background(), callTool("anvil_rm", map[string]any{
 		"model": "gpu-host",
 	}))
 	if err != nil {
@@ -168,7 +168,7 @@ func TestToolInspectAndRuntimes(t *testing.T) {
 	cfg.ModelDir = dir
 	runner := NewRunner(cfg, filepath.Join(t.TempDir(), "remotes.yaml"))
 
-	inspectRes, err := runner.toolInspect(context.Background(), callTool("nollama_inspect", map[string]any{
+	inspectRes, err := runner.toolInspect(context.Background(), callTool("anvil_inspect", map[string]any{
 		"model": filepath.Base(path),
 	}))
 	if err != nil {
@@ -177,7 +177,7 @@ func TestToolInspectAndRuntimes(t *testing.T) {
 	assertTextContains(t, inspectRes, "Model:")
 	assertTextContains(t, inspectRes, "Arch:")
 
-	runtimesRes, err := runner.toolRuntimes(context.Background(), callTool("nollama_runtimes", nil))
+	runtimesRes, err := runner.toolRuntimes(context.Background(), callTool("anvil_runtimes", nil))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -197,22 +197,22 @@ func TestToolValidation(t *testing.T) {
 		{
 			name: "load",
 			fn:   runner.toolLoad,
-			req:  callTool("nollama_load", nil),
+			req:  callTool("anvil_load", nil),
 		},
 		{
 			name: "pull",
 			fn:   runner.toolPull,
-			req:  callTool("nollama_pull", nil),
+			req:  callTool("anvil_pull", nil),
 		},
 		{
 			name: "rm",
 			fn:   runner.toolRm,
-			req:  callTool("nollama_rm", nil),
+			req:  callTool("anvil_rm", nil),
 		},
 		{
 			name: "inspect",
 			fn:   runner.toolInspect,
-			req:  callTool("nollama_inspect", nil),
+			req:  callTool("anvil_inspect", nil),
 		},
 	}
 

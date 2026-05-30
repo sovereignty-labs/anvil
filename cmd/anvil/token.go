@@ -14,7 +14,7 @@ var tokenCmd = &cobra.Command{
 	Short: "Manage HuggingFace authentication token",
 	Long: `Manage the HuggingFace token used by pull / search / run.
 
-Stored at $XDG_CONFIG_HOME/nollama/token (or ~/.config/nollama/token) with
+Stored at $XDG_CONFIG_HOME/anvil/token (or ~/.config/anvil/token) with
 mode 0600. When both the file and the HF_TOKEN env var are present, the
 file wins.`,
 }
@@ -45,10 +45,10 @@ var tokenRMCmd = &cobra.Command{
 // the config dir can't be resolved (no HOME, no XDG override).
 func tokenFilePath() string {
 	if xdg := os.Getenv("XDG_CONFIG_HOME"); xdg != "" {
-		return filepath.Join(xdg, "nollama", "token")
+		return filepath.Join(xdg, "anvil", "token")
 	}
 	if home, err := os.UserHomeDir(); err == nil && home != "" {
-		return filepath.Join(home, ".config", "nollama", "token")
+		return filepath.Join(home, ".config", "anvil", "token")
 	}
 	return ""
 }
@@ -84,7 +84,7 @@ func resolveHFToken() string {
 }
 
 // maskToken returns a display form like "hf_NChK...sDSti" so an over-the-
-// shoulder reader can't copy the secret out of nollama token show.
+// shoulder reader can't copy the secret out of anvil token show.
 func maskToken(token string) string {
 	if len(token) <= 11 {
 		return strings.Repeat("*", len(token))
@@ -115,7 +115,7 @@ func runTokenShow(_ *cobra.Command, _ []string) error {
 	src := resolveHFTokenSource()
 	if src.value == "" {
 		fmt.Fprintln(os.Stderr, "No HuggingFace token configured.")
-		fmt.Fprintln(os.Stderr, "Set one with: nollama token set <token>")
+		fmt.Fprintln(os.Stderr, "Set one with: anvil token set <token>")
 		fmt.Fprintln(os.Stderr, "Or export HF_TOKEN=<token>")
 		return nil
 	}

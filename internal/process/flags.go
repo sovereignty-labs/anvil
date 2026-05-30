@@ -6,9 +6,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/sovereignty-labs/nollama/internal/hardware"
-	"github.com/sovereignty-labs/nollama/internal/model"
-	runtimemgr "github.com/sovereignty-labs/nollama/internal/runtime"
+	"github.com/sovereignty-labs/anvil/internal/hardware"
+	"github.com/sovereignty-labs/anvil/internal/model"
+	runtimemgr "github.com/sovereignty-labs/anvil/internal/runtime"
 )
 
 // Result holds the computed flags, device selection, and metadata for a model load.
@@ -29,7 +29,7 @@ type Result struct {
 // EnsureHostFlag injects --host 0.0.0.0 into flags when no --host is already
 // present. llama-server itself defaults to 127.0.0.1, which makes spawned
 // instances unreachable from federation peers or other machines on the LAN —
-// the inverse of what nollama is for. Called on the final merged flag slice
+// the inverse of what anvil is for. Called on the final merged flag slice
 // (after smart defaults + config defaults + profiles + passthrough) so any
 // explicit user-supplied --host wins.
 func EnsureHostFlag(flags []string) []string {

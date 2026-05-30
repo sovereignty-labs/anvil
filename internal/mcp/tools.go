@@ -13,11 +13,11 @@ import (
 	"time"
 
 	mcpkit "github.com/mark3labs/mcp-go/mcp"
-	"github.com/sovereignty-labs/nollama/internal/config"
-	"github.com/sovereignty-labs/nollama/internal/federation"
-	"github.com/sovereignty-labs/nollama/internal/hardware"
-	"github.com/sovereignty-labs/nollama/internal/model"
-	"github.com/sovereignty-labs/nollama/internal/runtime"
+	"github.com/sovereignty-labs/anvil/internal/config"
+	"github.com/sovereignty-labs/anvil/internal/federation"
+	"github.com/sovereignty-labs/anvil/internal/hardware"
+	"github.com/sovereignty-labs/anvil/internal/model"
+	"github.com/sovereignty-labs/anvil/internal/runtime"
 )
 
 type modelDisplay struct {
@@ -29,13 +29,13 @@ type modelDisplay struct {
 }
 
 func (r *Runner) registerTools() {
-	r.server.AddTool(mcpkit.NewTool("nollama_status",
+	r.server.AddTool(mcpkit.NewTool("anvil_status",
 		mcpkit.WithDescription("Fleet overview across local and remote nodes"),
 		mcpkit.WithString("node",
 			mcpkit.Description("Filter to a specific remote node"),
 		),
 	), r.toolStatus)
-	r.server.AddTool(mcpkit.NewTool("nollama_load",
+	r.server.AddTool(mcpkit.NewTool("anvil_load",
 		mcpkit.WithDescription("Load a model on a local or remote node"),
 		mcpkit.WithString("model",
 			mcpkit.Required(),
@@ -52,7 +52,7 @@ func (r *Runner) registerTools() {
 			mcpkit.AdditionalProperties(true),
 		),
 	), r.toolLoad)
-	r.server.AddTool(mcpkit.NewTool("nollama_unload",
+	r.server.AddTool(mcpkit.NewTool("anvil_unload",
 		mcpkit.WithDescription("Unload a model from a local or remote node"),
 		mcpkit.WithString("model",
 			mcpkit.Required(),
@@ -62,13 +62,13 @@ func (r *Runner) registerTools() {
 			mcpkit.Description("Target remote node"),
 		),
 	), r.toolUnload)
-	r.server.AddTool(mcpkit.NewTool("nollama_models",
+	r.server.AddTool(mcpkit.NewTool("anvil_models",
 		mcpkit.WithDescription("List GGUFs on a local or remote node"),
 		mcpkit.WithString("node",
 			mcpkit.Description("Filter to a specific remote node"),
 		),
 	), r.toolModels)
-	r.server.AddTool(mcpkit.NewTool("nollama_pull",
+	r.server.AddTool(mcpkit.NewTool("anvil_pull",
 		mcpkit.WithDescription("Pull a HuggingFace model on a local or remote node"),
 		mcpkit.WithString("spec",
 			mcpkit.Required(),
@@ -78,17 +78,17 @@ func (r *Runner) registerTools() {
 			mcpkit.Description("Target remote node"),
 		),
 	), r.toolPull)
-	r.server.AddTool(mcpkit.NewTool("nollama_inspect",
+	r.server.AddTool(mcpkit.NewTool("anvil_inspect",
 		mcpkit.WithDescription("Inspect a GGUF and show hardware guidance"),
 		mcpkit.WithString("model",
 			mcpkit.Required(),
 			mcpkit.Description("GGUF filename or fuzzy match"),
 		),
 	), r.toolInspect)
-	r.server.AddTool(mcpkit.NewTool("nollama_runtimes",
+	r.server.AddTool(mcpkit.NewTool("anvil_runtimes",
 		mcpkit.WithDescription("List installed llama-server runtimes"),
 	), r.toolRuntimes)
-	r.server.AddTool(mcpkit.NewTool("nollama_rm",
+	r.server.AddTool(mcpkit.NewTool("anvil_rm",
 		mcpkit.WithDescription("Remove a local or remote model file"),
 		mcpkit.WithString("model",
 			mcpkit.Required(),
@@ -101,8 +101,8 @@ func (r *Runner) registerTools() {
 }
 
 func (r *Runner) toolStatus(ctx context.Context, req mcpkit.CallToolRequest) (*mcpkit.CallToolResult, error) {
-	logToolStart("nollama_status", req.GetArguments())
-	defer logToolEnd("nollama_status")
+	logToolStart("anvil_status", req.GetArguments())
+	defer logToolEnd("anvil_status")
 
 	node := strings.TrimSpace(argString(req.GetArguments(), "node"))
 	text, err := r.statusText(ctx, node)
@@ -113,8 +113,8 @@ func (r *Runner) toolStatus(ctx context.Context, req mcpkit.CallToolRequest) (*m
 }
 
 func (r *Runner) toolLoad(ctx context.Context, req mcpkit.CallToolRequest) (*mcpkit.CallToolResult, error) {
-	logToolStart("nollama_load", req.GetArguments())
-	defer logToolEnd("nollama_load")
+	logToolStart("anvil_load", req.GetArguments())
+	defer logToolEnd("anvil_load")
 
 	args := req.GetArguments()
 	modelName := strings.TrimSpace(argString(args, "model"))
@@ -146,8 +146,8 @@ func (r *Runner) toolLoad(ctx context.Context, req mcpkit.CallToolRequest) (*mcp
 }
 
 func (r *Runner) toolUnload(ctx context.Context, req mcpkit.CallToolRequest) (*mcpkit.CallToolResult, error) {
-	logToolStart("nollama_unload", req.GetArguments())
-	defer logToolEnd("nollama_unload")
+	logToolStart("anvil_unload", req.GetArguments())
+	defer logToolEnd("anvil_unload")
 
 	args := req.GetArguments()
 	modelName := strings.TrimSpace(argString(args, "model"))
@@ -170,8 +170,8 @@ func (r *Runner) toolUnload(ctx context.Context, req mcpkit.CallToolRequest) (*m
 }
 
 func (r *Runner) toolModels(ctx context.Context, req mcpkit.CallToolRequest) (*mcpkit.CallToolResult, error) {
-	logToolStart("nollama_models", req.GetArguments())
-	defer logToolEnd("nollama_models")
+	logToolStart("anvil_models", req.GetArguments())
+	defer logToolEnd("anvil_models")
 
 	node := strings.TrimSpace(argString(req.GetArguments(), "node"))
 	if node != "" {
@@ -247,8 +247,8 @@ func (r *Runner) toolModels(ctx context.Context, req mcpkit.CallToolRequest) (*m
 }
 
 func (r *Runner) toolPull(ctx context.Context, req mcpkit.CallToolRequest) (*mcpkit.CallToolResult, error) {
-	logToolStart("nollama_pull", req.GetArguments())
-	defer logToolEnd("nollama_pull")
+	logToolStart("anvil_pull", req.GetArguments())
+	defer logToolEnd("anvil_pull")
 
 	args := req.GetArguments()
 	spec := strings.TrimSpace(argString(args, "spec"))
@@ -272,8 +272,8 @@ func (r *Runner) toolPull(ctx context.Context, req mcpkit.CallToolRequest) (*mcp
 }
 
 func (r *Runner) toolInspect(ctx context.Context, req mcpkit.CallToolRequest) (*mcpkit.CallToolResult, error) {
-	logToolStart("nollama_inspect", req.GetArguments())
-	defer logToolEnd("nollama_inspect")
+	logToolStart("anvil_inspect", req.GetArguments())
+	defer logToolEnd("anvil_inspect")
 
 	modelName := strings.TrimSpace(argString(req.GetArguments(), "model"))
 	if modelName == "" {
@@ -318,8 +318,8 @@ func (r *Runner) toolInspect(ctx context.Context, req mcpkit.CallToolRequest) (*
 }
 
 func (r *Runner) toolRuntimes(ctx context.Context, req mcpkit.CallToolRequest) (*mcpkit.CallToolResult, error) {
-	logToolStart("nollama_runtimes", req.GetArguments())
-	defer logToolEnd("nollama_runtimes")
+	logToolStart("anvil_runtimes", req.GetArguments())
+	defer logToolEnd("anvil_runtimes")
 
 	mgr := runtime.NewManager()
 	runtimes, err := mgr.List()
@@ -345,8 +345,8 @@ func (r *Runner) toolRuntimes(ctx context.Context, req mcpkit.CallToolRequest) (
 }
 
 func (r *Runner) toolRm(ctx context.Context, req mcpkit.CallToolRequest) (*mcpkit.CallToolResult, error) {
-	logToolStart("nollama_rm", req.GetArguments())
-	defer logToolEnd("nollama_rm")
+	logToolStart("anvil_rm", req.GetArguments())
+	defer logToolEnd("anvil_rm")
 
 	args := req.GetArguments()
 	modelName := strings.TrimSpace(argString(args, "model"))
@@ -659,7 +659,7 @@ func resolveLocalModelDir(cfg *config.Config) (string, error) {
 	return config.DefaultConfig().ModelDir, nil
 }
 
-var mcpDebug = os.Getenv("NOLLAMA_MCP_DEBUG") != ""
+var mcpDebug = os.Getenv("ANVIL_MCP_DEBUG") != ""
 
 func logToolStart(name string, args map[string]any) {
 	if mcpDebug {

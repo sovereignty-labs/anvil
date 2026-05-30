@@ -1,4 +1,4 @@
-// Package config handles nollama YAML configuration.
+// Package config handles anvil YAML configuration.
 package config
 
 import (
@@ -11,21 +11,21 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// Config is the top-level nollama configuration.
+// Config is the top-level anvil configuration.
 type Config struct {
 	// ModelDir is where GGUFs live on this machine.
-	// Default: ~/.local/share/nollama/models
+	// Default: ~/.local/share/anvil/models
 	ModelDir string `yaml:"model_dir"`
 
 	// LlamaServer overrides the llama-server binary path.
-	// Normally managed by `nollama runtime` commands.
+	// Normally managed by `anvil runtime` commands.
 	LlamaServer string `yaml:"llama_server"`
 
 	// Bind is the listen address for the unified API endpoint.
 	// Default: 0.0.0.0:11434
 	Bind string `yaml:"bind"`
 
-	// Remotes are federated nollama nodes.
+	// Remotes are federated anvil nodes.
 	Remotes map[string]Remote `yaml:"remotes"`
 
 	// Autoload defines models to load on startup.
@@ -53,7 +53,7 @@ type Config struct {
 	RuntimesDir string `yaml:"runtimes_dir"`
 }
 
-// Remote is a federated nollama node.
+// Remote is a federated anvil node.
 type Remote struct {
 	URL string `yaml:"url"`
 }
@@ -177,16 +177,16 @@ func FindConfig() string {
 
 	// XDG config
 	if xdg := os.Getenv("XDG_CONFIG_HOME"); xdg != "" {
-		candidates = append(candidates, filepath.Join(xdg, "nollama", "config.yaml"))
+		candidates = append(candidates, filepath.Join(xdg, "anvil", "config.yaml"))
 	}
 
-	// ~/.config/nollama/config.yaml
+	// ~/.config/anvil/config.yaml
 	if home, err := os.UserHomeDir(); err == nil {
-		candidates = append(candidates, filepath.Join(home, ".config", "nollama", "config.yaml"))
+		candidates = append(candidates, filepath.Join(home, ".config", "anvil", "config.yaml"))
 	}
 
-	// /etc/nollama/config.yaml
-	candidates = append(candidates, "/etc/nollama/config.yaml")
+	// /etc/anvil/config.yaml
+	candidates = append(candidates, "/etc/anvil/config.yaml")
 
 	for _, path := range candidates {
 		if _, err := os.Stat(path); err == nil {
@@ -277,12 +277,12 @@ func (c *Config) ResolveAlias(name string) string {
 
 func defaultModelDir() string {
 	if xdg := os.Getenv("XDG_DATA_HOME"); xdg != "" {
-		return filepath.Join(xdg, "nollama", "models")
+		return filepath.Join(xdg, "anvil", "models")
 	}
 	if home, err := os.UserHomeDir(); err == nil {
-		return filepath.Join(home, ".local", "share", "nollama", "models")
+		return filepath.Join(home, ".local", "share", "anvil", "models")
 	}
-	return "/var/lib/nollama/models"
+	return "/var/lib/anvil/models"
 }
 
 func cloneFlags(flags map[string]interface{}) map[string]interface{} {

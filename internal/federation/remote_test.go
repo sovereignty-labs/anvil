@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/sovereignty-labs/nollama/internal/config"
+	"github.com/sovereignty-labs/anvil/internal/config"
 )
 
 func TestAddRemove(t *testing.T) {

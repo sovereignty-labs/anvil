@@ -29,12 +29,12 @@ jobs:
           COMMIT="$(git rev-parse --short HEAD)"
           DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
           CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
-            -ldflags "-X github.com/sovereignty-labs/nollama/internal/version.Version=${VERSION} -X github.com/sovereignty-labs/nollama/internal/version.Commit=${COMMIT} -X github.com/sovereignty-labs/nollama/internal/version.Date=${DATE}" \
-            -o nollama-linux-amd64 \
-            ./cmd/nollama
+            -ldflags "-X github.com/sovereignty-labs/anvil/internal/version.Version=${VERSION} -X github.com/sovereignty-labs/anvil/internal/version.Commit=${COMMIT} -X github.com/sovereignty-labs/anvil/internal/version.Date=${DATE}" \
+            -o anvil-linux-amd64 \
+            ./cmd/anvil
 
       - name: Create release
         uses: softprops/action-gh-release@v2
         with:
-          files: nollama-linux-amd64
+          files: anvil-linux-amd64
           generate_release_notes: true

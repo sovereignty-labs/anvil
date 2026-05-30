@@ -180,7 +180,7 @@ func TestPrebuiltArchiveExtractionAndValidation(t *testing.T) {
 		t.Fatalf("readBackendMarker() = %q, %v; want cuda, nil", backend, err)
 	}
 
-	manifest, err := readRuntimeManifest(filepath.Join(outDir, "nollama-runtime.json"))
+	manifest, err := readRuntimeManifest(filepath.Join(outDir, "anvil-runtime.json"))
 	if err != nil {
 		t.Fatalf("readRuntimeManifest() error = %v", err)
 	}
@@ -224,7 +224,7 @@ func writePrebuiltArchive(t *testing.T, archivePath, releaseTag, assetBackend, p
 		"libllama.so":     []byte("llama-" + packagedBackend),
 		"libmtmd.so.0":    []byte("mtmd-" + packagedBackend),
 		"backend":         []byte(packagedBackend + "\n"),
-		"nollama-runtime.json": []byte(fmt.Sprintf(
+		"anvil-runtime.json": []byte(fmt.Sprintf(
 			`{"llamacpp_version":"%s","backend":"%s","os":"linux","arch":"amd64"}`,
 			normalizedPrebuiltVersion(releaseTag),
 			packagedBackend,

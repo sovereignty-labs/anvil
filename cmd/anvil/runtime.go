@@ -6,7 +6,7 @@ import (
 	"strings"
 	"text/tabwriter"
 
-	runtimemgr "github.com/sovereignty-labs/nollama/internal/runtime"
+	runtimemgr "github.com/sovereignty-labs/anvil/internal/runtime"
 	"github.com/spf13/cobra"
 )
 
@@ -61,7 +61,7 @@ func runRuntimeList(_ *cobra.Command, _ []string) error {
 	}
 
 	if len(runtimes) == 0 {
-		fmt.Println("No runtimes installed. Run `nollama runtime install` to add one.")
+		fmt.Println("No runtimes installed. Run `anvil runtime install` to add one.")
 		return nil
 	}
 

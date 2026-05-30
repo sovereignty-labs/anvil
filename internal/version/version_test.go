@@ -14,7 +14,7 @@ func TestVersionStringFull(t *testing.T) {
 	Date = "2026-05-19T12:00:00Z"
 
 	got := String()
-	want := "nollama v0.1.0 (abc1234) built 2026-05-19T12:00:00Z"
+	want := "anvil v0.1.0 (abc1234) built 2026-05-19T12:00:00Z"
 	if got != want {
 		t.Errorf("got %q, want %q", got, want)
 	}
@@ -43,7 +43,7 @@ func TestVersionStringDevWithCommitAndDate(t *testing.T) {
 	Date = "2026-05-19T12:00:00Z"
 
 	got := String()
-	want := "nollama dev (abc1234) built 2026-05-19T12:00:00Z"
+	want := "anvil dev (abc1234) built 2026-05-19T12:00:00Z"
 	if got != want {
 		t.Errorf("got %q, want %q", got, want)
 	}
@@ -59,7 +59,7 @@ func TestVersionStringAllEmpty(t *testing.T) {
 	Date = "unknown"
 
 	got := String()
-	want := "nollama dev (unknown)"
+	want := "anvil dev (unknown)"
 	if got != want {
 		t.Errorf("got %q, want %q", got, want)
 	}
@@ -74,7 +74,7 @@ func TestVersionStringEmptyStringsFallToDefaults(t *testing.T) {
 	Date = ""
 
 	got := String()
-	want := "nollama dev (unknown)"
+	want := "anvil dev (unknown)"
 	if got != want {
 		t.Errorf("got %q, want %q", got, want)
 	}

@@ -1,11 +1,11 @@
 #!/bin/sh
 set -e
 
-# nollama installer
-# Usage: curl -fsSL https://raw.githubusercontent.com/sovereignty-labs/nollama/main/install.sh | sh
+# anvil installer
+# Usage: curl -fsSL https://raw.githubusercontent.com/sovereignty-labs/anvil/main/install.sh | sh
 
-REPO="sovereignty-labs/nollama"
-BINARY="nollama"
+REPO="sovereignty-labs/anvil"
+BINARY="anvil"
 
 # Detect platform
 OS=$(uname -s | tr '[:upper:]' '[:lower:]')
@@ -34,7 +34,7 @@ else
   mkdir -p "$INSTALL_DIR"
 fi
 
-echo "Installing nollama..."
+echo "Installing anvil..."
 echo "  Platform: ${OS}/${ARCH}"
 echo "  From:     ${URL}"
 echo "  To:       ${INSTALL_DIR}/${BINARY}"
@@ -75,7 +75,7 @@ esac
 
 echo ""
 echo "Next steps:"
-echo "  nollama runtime install    # download llama-server"
-echo "  nollama pull org/model:Q4_K_M   # download a model"
-echo "  nollama serve &            # start the daemon"
-echo "  nollama load model.gguf    # load and serve"
+echo "  anvil runtime install    # download llama-server"
+echo "  anvil pull org/model:Q4_K_M   # download a model"
+echo "  anvil serve &            # start the daemon"
+echo "  anvil load model.gguf    # load and serve"

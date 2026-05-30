@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/sovereignty-labs/nollama/internal/hardware"
+	"github.com/sovereignty-labs/anvil/internal/hardware"
 )
 
 type statusResponse struct {
