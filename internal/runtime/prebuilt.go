@@ -94,6 +94,8 @@ func (m *Manager) installPrebuiltRuntime(version string, platform Platform) (*Ru
 	if err := extractRuntime(archivePath, workDir); err != nil {
 		return nil, err
 	}
+	_ = os.Remove(archivePath)
+	_ = os.Remove(checksumPath)
 
 	if err := validatePrebuiltRuntimeBundle(workDir, release.TagName, platform, backend); err != nil {
 		return nil, err

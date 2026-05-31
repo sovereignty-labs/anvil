@@ -1011,12 +1011,26 @@ func extractRuntimeFromZip(archivePath, destDir string) error {
 			continue
 		}
 		outPath := filepath.Join(destDir, filepath.Base(stripped))
-		if err := os.MkdirAll(filepath.Dir(outPath), 0o755); err != nil {
-			return fmt.Errorf("create dir for %s: %w", outPath, err)
-		}
 		rc, err := file.Open()
 		if err != nil {
 			return fmt.Errorf("open %s in archive: %w", file.Name, err)
+		}
+		if file.Mode()&os.ModeSymlink != 0 {
+			targetBytes, rerr := io.ReadAll(rc)
+			rc.Close()
+			if rerr != nil {
+				return fmt.Errorf("read symlink target %s: %w", file.Name, rerr)
+			}
+			target := filepath.Base(strings.TrimSpace(string(targetBytes)))
+			if target == "" || strings.Contains(string(targetBytes), "..") {
+				continue
+			}
+			_ = os.Remove(outPath)
+			if err := os.Symlink(target, outPath); err != nil {
+				return fmt.Errorf("create symlink %s -> %s: %w", outPath, target, err)
+			}
+			count++
+			continue
 		}
 		if err := writeArchiveEntry(outPath, rc); err != nil {
 			rc.Close()
@@ -1058,21 +1072,33 @@ func extractRuntimeFromTarGz(archivePath, destDir string) error {
 		if err != nil {
 			return fmt.Errorf("read tar archive %s: %w", archivePath, err)
 		}
-		if hdr.FileInfo().IsDir() {
-			continue
-		}
 		stripped := stripTopDir(hdr.Name)
 		if stripped == "" || strings.Contains(stripped, "..") {
 			continue
 		}
 		outPath := filepath.Join(destDir, filepath.Base(stripped))
-		if err := os.MkdirAll(filepath.Dir(outPath), 0o755); err != nil {
-			return fmt.Errorf("create dir for %s: %w", outPath, err)
+		switch hdr.Typeflag {
+		case tar.TypeDir:
+			continue
+		case tar.TypeSymlink, tar.TypeLink:
+			// Runtime tarballs are flat: the link target is a sibling
+			// basename. Create a RELATIVE symlink so it stays valid after
+			// the work dir is renamed into its final location.
+			target := filepath.Base(hdr.Linkname)
+			if target == "" || strings.Contains(hdr.Linkname, "..") {
+				continue
+			}
+			_ = os.Remove(outPath)
+			if err := os.Symlink(target, outPath); err != nil {
+				return fmt.Errorf("create symlink %s -> %s: %w", outPath, target, err)
+			}
+			count++
+		default:
+			if err := writeArchiveEntry(outPath, tr); err != nil {
+				return err
+			}
+			count++
 		}
-		if err := writeArchiveEntry(outPath, tr); err != nil {
-			return err
-		}
-		count++
 	}
 	if count == 0 {
 		return fmt.Errorf("no files extracted from %s", archivePath)
