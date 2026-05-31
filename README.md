@@ -243,7 +243,7 @@ Ollama promised to make llama.cpp accessible. anvil delivers on that promise wit
 | Configuration | Proprietary Modelfile | GGUF metadata + CLI flags |
 | Chat templates | Hardcoded list | `--jinja` (reads GGUF-embedded templates) |
 | Quantization | 5 types | All (inherited from llama.cpp) |
-| Inference overhead | 30-50% slower | 0% (pure proxy) |
+| Inference path | Bundled, modified engine | Pure proxy to unmodified llama-server (no added overhead) |
 | Multi-node fleet | No | Federation + MCP |
 | Flag visibility | Hidden | `--dry-run` shows everything |
 | Fork support | No | Per-model runtime selection |
