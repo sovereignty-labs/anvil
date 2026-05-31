@@ -65,7 +65,7 @@ trap cleanup EXIT HUP INT TERM
 
 copy_runtime_file() {
   src=$1
-  cp -L "$src" "$staging_dir/"
+  cp -a "$src" "$staging_dir/"
 }
 
 copy_runtime_file "$source_dir/llama-server"
@@ -79,10 +79,7 @@ cat > "$staging_dir/anvil-runtime.json" <<EOF
 {"llamacpp_version":"$llamacpp_version","backend":"$backend","os":"linux","arch":"$arch"}
 EOF
 
-for path in "$staging_dir"/llama-server "$staging_dir"/*.so*; do
-  [ -e "$path" ] || continue
-  patchelf --set-rpath '$ORIGIN' "$path"
-done
+find "$staging_dir" -maxdepth 1 -type f \( -name 'llama-server' -o -name '*.so*' \) -exec patchelf --set-rpath '$ORIGIN' {} +
 
 tarball="llama-server-${llamacpp_version}-linux-${arch}-${backend}.tar.gz"
 tarball_path="$(pwd)/$tarball"
