@@ -7,7 +7,6 @@ set -e
 REPO="sovereignty-labs/anvil"
 BINARY="anvil"
 
-# Detect platform
 OS=$(uname -s | tr '[:upper:]' '[:lower:]')
 ARCH=$(uname -m)
 
@@ -26,35 +25,39 @@ esac
 ASSET="${BINARY}-${OS}-${ARCH}"
 URL="https://github.com/${REPO}/releases/latest/download/${ASSET}"
 
-# Determine install directory
+# Prefer a system path already on PATH so anvil works immediately.
+# Use sudo when not root; fall back to a user-local dir (and persist PATH) only if sudo is unavailable.
+SUDO=""
 if [ "$(id -u)" -eq 0 ]; then
   INSTALL_DIR="/usr/local/bin"
+elif command -v sudo >/dev/null 2>&1; then
+  INSTALL_DIR="/usr/local/bin"
+  SUDO="sudo"
 else
   INSTALL_DIR="${HOME}/.local/bin"
-  mkdir -p "$INSTALL_DIR"
 fi
+$SUDO mkdir -p "$INSTALL_DIR"
 
 echo "Installing anvil..."
 echo "  Platform: ${OS}/${ARCH}"
 echo "  From:     ${URL}"
 echo "  To:       ${INSTALL_DIR}/${BINARY}"
 
-# Download
+TMP="$(mktemp)"
 if command -v curl >/dev/null 2>&1; then
-  curl -fsSL "$URL" -o "${INSTALL_DIR}/${BINARY}"
+  curl -fsSL "$URL" -o "$TMP"
 elif command -v wget >/dev/null 2>&1; then
-  wget -q "$URL" -O "${INSTALL_DIR}/${BINARY}"
+  wget -q "$URL" -O "$TMP"
 else
-  echo "Error: curl or wget required"
-  exit 1
+  echo "Error: curl or wget required"; rm -f "$TMP"; exit 1
 fi
 
-chmod +x "${INSTALL_DIR}/${BINARY}"
+$SUDO install -m 0755 "$TMP" "${INSTALL_DIR}/${BINARY}"
+rm -f "$TMP"
 
-# Verify
 if "${INSTALL_DIR}/${BINARY}" version >/dev/null 2>&1; then
   echo ""
-  $INSTALL_DIR/$BINARY version
+  "${INSTALL_DIR}/${BINARY}" version
   echo ""
   echo "Installed successfully."
 else
@@ -63,19 +66,30 @@ else
   exit 1
 fi
 
-# Check PATH
-case ":$PATH:" in
-  *":${INSTALL_DIR}:"*) ;;
-  *)
-    echo ""
-    echo "Note: ${INSTALL_DIR} is not in your PATH."
-    echo "Add it with: export PATH=\"${INSTALL_DIR}:\$PATH\""
-    ;;
-esac
+ON_PATH=0
+case ":$PATH:" in *":${INSTALL_DIR}:"*) ON_PATH=1 ;; esac
+
+if [ "$ON_PATH" -eq 0 ]; then
+  # Only reached in the user-local fallback (sudo unavailable).
+  LINE="export PATH=\"${INSTALL_DIR}:\$PATH\""
+  MARKER="# added by anvil installer"
+  case "$(basename "${SHELL:-/bin/sh}")" in
+    zsh)  RC="${ZDOTDIR:-$HOME}/.zshrc" ;;
+    bash) RC="$HOME/.bashrc" ;;
+    *)    RC="$HOME/.profile" ;;
+  esac
+  if ! { [ -f "$RC" ] && grep -qF "$MARKER" "$RC"; }; then
+    printf '\n%s\n%s\n' "$MARKER" "$LINE" >> "$RC"
+  fi
+  echo ""
+  echo "${INSTALL_DIR} was added to your PATH in ${RC}."
+  echo "Use anvil now in this shell (or open a new terminal):"
+  echo "  ${LINE}"
+fi
 
 echo ""
 echo "Next steps:"
-echo "  anvil runtime install    # download llama-server"
+echo "  anvil runtime install         # download llama-server"
 echo "  anvil pull org/model:Q4_K_M   # download a model"
-echo "  anvil serve &            # start the daemon"
-echo "  anvil load model.gguf    # load and serve"
+echo "  anvil serve &                 # start the daemon"
+echo "  anvil load model.gguf         # load and serve"
