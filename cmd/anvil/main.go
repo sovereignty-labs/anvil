@@ -5,6 +5,8 @@ import (
 	"encoding/hex"
 	"fmt"
 	"io"
+	"net"
+	"net/http"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -141,6 +143,19 @@ func runUnload(cmd *cobra.Command, args []string) error {
 		}
 		nodeName, _ := cmd.Flags().GetString("node")
 		fmt.Printf("Unloaded model %s on %s\n", filepath.Base(modelName), nodeName)
+		return nil
+	}
+
+	// Local daemon fast path: unload through the daemon's API when one is up.
+	cfg, cfgErr := loadCLIConfig()
+	if cfgErr != nil {
+		return cfgErr
+	}
+	if local, _ := localDaemonClient(cfg); local != nil {
+		if err := local.Unload(filepath.Base(modelName)); err != nil {
+			return err
+		}
+		fmt.Printf("Unloaded model %s from local daemon\n", filepath.Base(modelName))
 		return nil
 	}
 
@@ -328,6 +343,35 @@ func runLoad(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
+	// Local fast path: hand the load to a running local daemon via its
+	// management API and return immediately, instead of spawning a blocking
+	// foreground llama-server. --dry-run still computes locally below.
+	// Passthrough args after `--` are not forwarded over the API (parity with
+	// remote --node loads); the daemon applies its smart defaults.
+	dryRun, _ := cmd.Flags().GetBool("dry-run")
+	if !dryRun {
+		if local, localURL := localDaemonClient(cfg); local != nil {
+			req, appliedProfiles, warnings, err := buildRemoteLoadRequest(cmd, modelPath)
+			if err != nil {
+				return err
+			}
+			resp, err := local.Load(req)
+			if err != nil {
+				return err
+			}
+			for _, warning := range warnings {
+				fmt.Fprintf(os.Stderr, "WARNING: %s\n", warning)
+			}
+			if len(appliedProfiles) > 0 {
+				fmt.Printf("Applied profiles: %s\n", strings.Join(appliedProfiles, ", "))
+			}
+			fmt.Printf("Loaded model %s into local daemon (port %d, PID %d, device %s)\n",
+				resp.Model, resp.Port, resp.PID, resp.Device)
+			fmt.Printf("Endpoint: %s/v1\n", localURL)
+			return nil
+		}
+	}
+
 	// Resolve llama-server path and backend
 	llamaServerFlag, backend, err := resolveLlamaServerPathWithRuntime(cmd, cfg, getRuntimeFlag(cmd))
 	if err != nil {
@@ -369,7 +413,6 @@ func runLoad(cmd *cobra.Command, args []string) error {
 
 	// Compute flags
 	fmt.Println("Computing flags...")
-	dryRun, _ := cmd.Flags().GetBool("dry-run")
 
 	result, err := process.ComputeFlags(meta, modelPath, inv, llamaServerFlag, 0, backend)
 	if err != nil {
@@ -836,6 +879,44 @@ func buildRemoteLoadRequest(cmd *cobra.Command, modelPath string) (federation.Lo
 	}
 
 	return req, appliedProfiles, warnings, nil
+}
+
+// localDaemonURL converts a daemon bind address into a loopback-reachable URL.
+// Wildcard/empty hosts become 127.0.0.1; a concrete host or IP is preserved.
+// Returns "" when bind is empty or unparseable.
+func localDaemonURL(bind string) string {
+	bind = strings.TrimSpace(bind)
+	if bind == "" {
+		return ""
+	}
+	host, port, err := net.SplitHostPort(bind)
+	if err != nil {
+		return ""
+	}
+	if host == "" || host == "0.0.0.0" || host == "::" {
+		host = "127.0.0.1"
+	}
+	return "http://" + net.JoinHostPort(host, port)
+}
+
+// localDaemonClient returns a federation client (and its base URL) for a local
+// anvil daemon if one answers /api/status quickly, else (nil, ""). The short
+// timeout keeps the no-daemon path snappy.
+func localDaemonClient(cfg *config.Config) (*federation.Client, string) {
+	url := localDaemonURL(cfg.Bind)
+	if url == "" {
+		return nil, ""
+	}
+	httpClient := &http.Client{Timeout: 400 * time.Millisecond}
+	resp, err := httpClient.Get(url + "/api/status")
+	if err != nil {
+		return nil, ""
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, ""
+	}
+	return federation.NewClient(url), url
 }
 
 func resolveNodeClient(cmd *cobra.Command) (*federation.Client, error) {
