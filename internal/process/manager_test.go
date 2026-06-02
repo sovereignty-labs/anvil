@@ -1474,6 +1474,32 @@ func TestWaitForReadyDetectsImmediateCrash(t *testing.T) {
 	}
 }
 
+func TestManager_Start_ReportsSharedLibraryCrash(t *testing.T) {
+	tmpDir := t.TempDir()
+	manager := NewManager(nil)
+	manager.SetLogDir(tmpDir)
+
+	mockScript := filepath.Join(tmpDir, "shared-lib-crash")
+	err := os.WriteFile(mockScript, []byte("#!/bin/sh\necho 'error while loading shared libraries: libllama-common.so.0: file too short' 1>&2\nexit 1\n"), 0o755)
+	if err != nil {
+		t.Fatalf("failed to create mock script: %v", err)
+	}
+
+	result := makeTestResult(t, 19944, mockScript)
+	result.ReadyTimeout = 2 * time.Second
+
+	_, err = manager.Start(result, "test-model.gguf", nil)
+	if err == nil {
+		t.Fatal("expected Start() to fail for shared library crash")
+	}
+	if strings.Contains(err.Error(), "timed out after") {
+		t.Fatalf("expected crash detection, got timeout: %v", err)
+	}
+	if !strings.Contains(err.Error(), "file too short") {
+		t.Fatalf("Start() error = %v, want shared library stderr", err)
+	}
+}
+
 func ldEntries(env []string) []string {
 	out := make([]string, 0)
 	for _, e := range env {

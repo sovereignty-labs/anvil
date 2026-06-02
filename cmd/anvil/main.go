@@ -431,6 +431,7 @@ func runLoad(cmd *cobra.Command, args []string) error {
 	}
 	result.Flags = process.MergePassthroughFlags(result.Flags, config.FlagsMapToSlice(overlayFlags))
 	result.Command = buildCommand(llamaServerFlag, result.Flags)
+	result.ReadyTimeout = 60 * time.Second
 
 	if dryRun {
 		fmt.Println()

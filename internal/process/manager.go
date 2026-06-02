@@ -744,9 +744,34 @@ func classifyCrashLog(logText string) string {
 		return "Not enough VRAM. Try a smaller model or reduce --ctx-size."
 	case strings.Contains(lower, "unknown model architecture"), strings.Contains(lower, "unrecognized model"):
 		return "This model architecture is not supported by your llama-server version. Update with: anvil runtime install"
+	case strings.Contains(lower, "error while loading shared libraries"),
+		strings.Contains(lower, "cannot open shared object file"),
+		strings.Contains(lower, "undefined symbol"),
+		strings.Contains(lower, "wrong elf class"),
+		strings.Contains(lower, "file too short"):
+		if line := firstMatchingCrashLine(logText, "error while loading shared libraries", "cannot open shared object file", "undefined symbol", "wrong elf class", "file too short"); line != "" {
+			return line
+		}
+		return "shared library or ELF load failure"
 	default:
 		return ""
 	}
+}
+
+func firstMatchingCrashLine(logText string, needles ...string) string {
+	if logText == "" || len(needles) == 0 {
+		return ""
+	}
+	lines := strings.Split(strings.ReplaceAll(logText, "\r\n", "\n"), "\n")
+	for _, raw := range lines {
+		lower := strings.ToLower(raw)
+		for _, needle := range needles {
+			if strings.Contains(lower, strings.ToLower(needle)) {
+				return strings.TrimSpace(raw)
+			}
+		}
+	}
+	return ""
 }
 
 // List returns all tracked processes with their current status.
