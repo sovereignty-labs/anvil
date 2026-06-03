@@ -123,5 +123,8 @@ func newLoadTestCommand(t *testing.T) *cobra.Command {
 	cmd.Flags().Int("port", 0, "")
 	cmd.Flags().String("alias", "", "")
 	cmd.Flags().String("runtime", "", "")
+	cmd.Flags().String("node", "", "")
+	cmd.Flags().Bool("dry-run", false, "")
+	cmd.Flags().StringArray("passthrough", nil, "")
 	return cmd
 }
