@@ -21,9 +21,10 @@ type chatMessage struct {
 
 // chatRequest is the JSON body POSTed to /v1/chat/completions.
 type chatRequest struct {
-	Model    string        `json:"model"`
-	Messages []chatMessage `json:"messages"`
-	Stream   bool          `json:"stream"`
+	Model              string         `json:"model"`
+	Messages           []chatMessage  `json:"messages"`
+	Stream             bool           `json:"stream"`
+	ChatTemplateKwargs map[string]any `json:"chat_template_kwargs,omitempty"`
 }
 
 // streamChunk is the slice of an SSE chunk we care about. Many fields are
@@ -68,12 +69,19 @@ type streamStats struct {
 //
 // The ctx is honored mid-stream: cancelling it closes the response body so a
 // long generation can be interrupted (used for Ctrl+C during a reply).
-func streamChat(ctx context.Context, endpoint, modelName string, messages []chatMessage, onToken func(content, reasoning string)) (string, streamStats, error) {
-	body, err := json.Marshal(chatRequest{
+func streamChat(ctx context.Context, endpoint, modelName string, messages []chatMessage, thinkEnabled bool, onToken func(content, reasoning string)) (string, streamStats, error) {
+	reqBody := chatRequest{
 		Model:    modelName,
 		Messages: messages,
 		Stream:   true,
-	})
+	}
+	if !thinkEnabled {
+		reqBody.ChatTemplateKwargs = map[string]any{
+			"enable_thinking": false,
+		}
+	}
+
+	body, err := json.Marshal(reqBody)
 	if err != nil {
 		return "", streamStats{}, fmt.Errorf("encode chat request: %w", err)
 	}
@@ -312,7 +320,7 @@ type inputResult struct {
 // prompt (no stream in flight), an interrupt exits cleanly. A connection
 // error after streamChat means the backend died — the loop reports that and
 // exits rather than spamming "connection refused" on every subsequent input.
-func chatLoop(endpoint, modelName string, interrupt <-chan struct{}, in io.Reader, out io.Writer) error {
+func chatLoop(endpoint, modelName string, thinkEnabled bool, interrupt <-chan struct{}, in io.Reader, out io.Writer) error {
 	supportsANSI := isTTY(out)
 	fmt.Fprintf(out, "Chatting with %s. Type /bye to exit.\n", modelName)
 
@@ -365,7 +373,7 @@ func chatLoop(endpoint, modelName string, interrupt <-chan struct{}, in io.Reade
 		}()
 
 		state := renderState{supportsANSI: supportsANSI}
-		reply, stats, err := streamChat(ctx, endpoint, modelName, messages, func(content, reasoning string) {
+		reply, stats, err := streamChat(ctx, endpoint, modelName, messages, thinkEnabled, func(content, reasoning string) {
 			state.write(out, content, reasoning)
 		})
 		state.closeReasoning(out)

@@ -18,33 +18,12 @@ func TestRunModelCommandDefinesGPUFlag(t *testing.T) {
 	}
 }
 
-func TestRunModelCommandDefinesNoThinkFlag(t *testing.T) {
-	flag := runModelCmd.Flags().Lookup("no-think")
+func TestRunModelCommandDefinesThinkFlag(t *testing.T) {
+	flag := runModelCmd.Flags().Lookup("think")
 	if flag == nil {
-		t.Fatal("expected run command to define --no-think flag")
+		t.Fatal("expected run command to define --think flag")
 	}
 	if got, want := flag.DefValue, "false"; got != want {
-		t.Fatalf("no-think flag default = %q, want %q", got, want)
-	}
-}
-
-func TestCollectRunPassthroughAddsNoThinkOverride(t *testing.T) {
-	cmd := runModelCmd
-	if err := cmd.Flags().Set("no-think", "true"); err != nil {
-		t.Fatalf("set no-think: %v", err)
-	}
-	defer func() {
-		_ = cmd.Flags().Set("no-think", "false")
-	}()
-
-	got := collectRunPassthrough(cmd, []string{"model.gguf"})
-	want := []string{"--chat-template-kwargs", `{"enable_thinking": false}`}
-	if len(got) != len(want) {
-		t.Fatalf("got %v, want %v", got, want)
-	}
-	for i := range want {
-		if got[i] != want[i] {
-			t.Fatalf("got %v, want %v", got, want)
-		}
+		t.Fatalf("think flag default = %q, want %q", got, want)
 	}
 }

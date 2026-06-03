@@ -41,7 +41,7 @@ Examples:
 func init() {
 	runModelCmd.Flags().Int("gpu", -1, "GPU index (-1 for auto)")
 	runModelCmd.Flags().Bool("cpu", false, "Force CPU inference")
-	runModelCmd.Flags().Bool("no-think", false, "Disable model thinking via chat-template kwargs")
+	runModelCmd.Flags().Bool("think", false, "Enable model thinking and reasoning output")
 	runModelCmd.Flags().String("runtime", "", "Use a specific llama-server runtime")
 	runModelCmd.Flags().Int("port", 0, "Pin llama-server to this port instead of auto-assigning")
 	runModelCmd.Flags().StringArray("passthrough", nil, "Extra llama-server flags (repeatable)")
@@ -54,6 +54,7 @@ func runRunModel(cmd *cobra.Command, args []string) error {
 		return err
 	}
 	modelName := filepath.Base(modelPath)
+	thinkEnabled, _ := cmd.Flags().GetBool("think")
 
 	cfg, err := loadCLIConfig()
 	if err != nil {
@@ -64,7 +65,7 @@ func runRunModel(cmd *cobra.Command, args []string) error {
 	// through its proxy and skip spawning a second instance.
 	if endpoint, ok := findDaemonEndpointForModel(cfg, modelName); ok {
 		fmt.Fprintf(os.Stderr, "Connecting to running daemon: %s\n", endpoint)
-		return runChatAgainst(endpoint, modelStem(modelName), false)
+		return runChatAgainst(endpoint, modelStem(modelName), false, thinkEnabled)
 	}
 
 	runtimeName, _ := cmd.Flags().GetString("runtime")
@@ -74,7 +75,7 @@ func runRunModel(cmd *cobra.Command, args []string) error {
 	}
 	defer cleanup()
 
-	return runChatAgainst(endpoint, modelStem(modelName), true)
+	return runChatAgainst(endpoint, modelStem(modelName), true, thinkEnabled)
 }
 
 // startLlamaServerForRun spawns a llama-server, waits for it to become healthy,
@@ -117,7 +118,7 @@ func startLlamaServerForRun(cmd *cobra.Command, args []string, cfg *config.Confi
 	}
 	result.Command = buildCommand(llamaServerFlag, result.Flags)
 
-	passthrough := collectRunPassthrough(cmd, args)
+	passthrough := collectPassthrough(cmd, args)
 
 	manager := process.GetManager()
 	for _, proc := range manager.List() {
@@ -151,22 +152,11 @@ func startLlamaServerForRun(cmd *cobra.Command, args []string, cfg *config.Confi
 	return endpoint, cleanup, nil
 }
 
-// collectRunPassthrough combines user passthrough flags with run-specific
-// overrides such as --no-think.
-func collectRunPassthrough(cmd *cobra.Command, args []string) []string {
-	passthrough := collectPassthrough(cmd, args)
-	noThink, _ := cmd.Flags().GetBool("no-think")
-	if noThink {
-		passthrough = append(passthrough, "--chat-template-kwargs", `{"enable_thinking": false}`)
-	}
-	return passthrough
-}
-
 // runChatAgainst opens the interactive chat loop against endpoint and wires
 // up Ctrl+C handling. When ownedProcess is true, the first Ctrl+C cancels the
 // in-flight stream rather than exiting; a second Ctrl+C exits. When false
 // (daemon mode), Ctrl+C just exits.
-func runChatAgainst(endpoint, modelName string, ownedProcess bool) error {
+func runChatAgainst(endpoint, modelName string, ownedProcess bool, thinkEnabled bool) error {
 	interrupt := make(chan struct{}, 1)
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
@@ -174,7 +164,7 @@ func runChatAgainst(endpoint, modelName string, ownedProcess bool) error {
 
 	done := make(chan error, 1)
 	go func() {
-		done <- chatLoop(endpoint, modelName, interrupt, os.Stdin, os.Stdout)
+		done <- chatLoop(endpoint, modelName, thinkEnabled, interrupt, os.Stdin, os.Stdout)
 	}()
 
 	for {
