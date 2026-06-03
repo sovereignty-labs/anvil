@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -106,7 +107,7 @@ func TestStreamChatEndToEnd(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	got, stats, err := streamChat(context.Background(), srv.URL, "m", []chatMessage{{Role: "user", Content: "yo"}}, nil)
+	got, stats, err := streamChat(context.Background(), srv.URL, "m", []chatMessage{{Role: "user", Content: "yo"}}, false, nil)
 	if err != nil {
 		t.Fatalf("streamChat: %v", err)
 	}
@@ -124,12 +125,59 @@ func TestStreamChatPropagatesHTTPError(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	_, _, err := streamChat(context.Background(), srv.URL, "m", nil, nil)
+	_, _, err := streamChat(context.Background(), srv.URL, "m", nil, false, nil)
 	if err == nil {
 		t.Fatal("expected error from 400 response")
 	}
 	if !strings.Contains(err.Error(), "model not loaded") {
 		t.Errorf("expected upstream error to surface, got %v", err)
+	}
+}
+
+func TestStreamChatDefaultsThinkingOff(t *testing.T) {
+	var seen chatRequest
+	var decodeErr error
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		decodeErr = json.NewDecoder(r.Body).Decode(&seen)
+		w.Header().Set("Content-Type", "text/event-stream")
+		fmt.Fprint(w, "data: [DONE]\n\n")
+	}))
+	defer srv.Close()
+
+	_, _, err := streamChat(context.Background(), srv.URL, "m", []chatMessage{{Role: "user", Content: "yo"}}, false, nil)
+	if err != nil {
+		t.Fatalf("streamChat: %v", err)
+	}
+	if decodeErr != nil {
+		t.Fatalf("decode request: %v", decodeErr)
+	}
+	if seen.ChatTemplateKwargs == nil {
+		t.Fatal("expected chat_template_kwargs to be sent by default")
+	}
+	if got, ok := seen.ChatTemplateKwargs["enable_thinking"]; !ok || got != false {
+		t.Fatalf("enable_thinking = %#v, want false", seen.ChatTemplateKwargs["enable_thinking"])
+	}
+}
+
+func TestStreamChatThinkOptInOmitsThinkingKwargs(t *testing.T) {
+	var seen chatRequest
+	var decodeErr error
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		decodeErr = json.NewDecoder(r.Body).Decode(&seen)
+		w.Header().Set("Content-Type", "text/event-stream")
+		fmt.Fprint(w, "data: [DONE]\n\n")
+	}))
+	defer srv.Close()
+
+	_, _, err := streamChat(context.Background(), srv.URL, "m", []chatMessage{{Role: "user", Content: "yo"}}, true, nil)
+	if err != nil {
+		t.Fatalf("streamChat: %v", err)
+	}
+	if decodeErr != nil {
+		t.Fatalf("decode request: %v", decodeErr)
+	}
+	if seen.ChatTemplateKwargs != nil {
+		t.Fatalf("expected no chat_template_kwargs when --think is set, got %#v", seen.ChatTemplateKwargs)
 	}
 }
 
@@ -223,7 +271,7 @@ func TestChatLoopByeCommand(t *testing.T) {
 	var out bytes.Buffer
 	interrupt := make(chan struct{})
 
-	err := chatLoop("http://unused", "test-model", interrupt, in, &out)
+	err := chatLoop("http://unused", "test-model", false, interrupt, in, &out)
 	if err != nil {
 		t.Fatalf("chatLoop: %v", err)
 	}
@@ -251,7 +299,7 @@ func TestChatLoopReceivesReplyFromFakeServer(t *testing.T) {
 	var out bytes.Buffer
 	interrupt := make(chan struct{})
 
-	err := chatLoop(srv.URL, "test-model", interrupt, in, &out)
+	err := chatLoop(srv.URL, "test-model", false, interrupt, in, &out)
 	if err != nil {
 		t.Fatalf("chatLoop: %v", err)
 	}
@@ -314,7 +362,7 @@ func TestChatLoopExitsOnConnectionRefused(t *testing.T) {
 	var out bytes.Buffer
 	interrupt := make(chan struct{})
 
-	err := chatLoop(endpoint, "test-model", interrupt, in, &out)
+	err := chatLoop(endpoint, "test-model", false, interrupt, in, &out)
 	if err != nil {
 		t.Fatalf("chatLoop returned %v, want nil", err)
 	}
@@ -331,7 +379,7 @@ func TestChatLoopExitsOnInterruptAtPrompt(t *testing.T) {
 	interrupt := make(chan struct{}, 1)
 
 	done := make(chan error, 1)
-	go func() { done <- chatLoop("http://unused", "m", interrupt, in, &out) }()
+	go func() { done <- chatLoop("http://unused", "m", false, interrupt, in, &out) }()
 
 	// Give chatLoop a tick to reach the prompt before signaling.
 	time.Sleep(50 * time.Millisecond)
@@ -353,7 +401,7 @@ func TestChatLoopExitsOnExitAlias(t *testing.T) {
 			in := strings.NewReader(alias + "\n")
 			var out bytes.Buffer
 			interrupt := make(chan struct{})
-			if err := chatLoop("http://unused", "m", interrupt, in, &out); err != nil {
+			if err := chatLoop("http://unused", "m", false, interrupt, in, &out); err != nil {
 				t.Fatalf("chatLoop returned %v", err)
 			}
 		})
