@@ -52,7 +52,7 @@ Pick by your GPU's VRAM. These are tested starting points - anvil works with any
 
 | VRAM | Model | Pull Command | Speed (approx) |
 |------|-------|-------------|----------------|
-| **8 GB** | Qwen3.6-35B-A3B UD-IQ2_M | `anvil pull unsloth/Qwen3.6-35B-A3B-GGUF:UD-IQ2_M` | ~50 tok/s |
+| **8 GB**   | Gemma 4 E4B IQ4\_XS         | `anvil pull unsloth/gemma-4-E4B-it-GGUF:IQ4_XS`     | ~90 tok/s      |
 | **12 GB** | Qwen3.6-35B-A3B UD-IQ3_S | `anvil pull unsloth/Qwen3.6-35B-A3B-GGUF:UD-IQ3_S` | ~80 tok/s |
 | **16 GB** | Qwen3.6-35B-A3B UD-IQ4_NL | `anvil pull unsloth/Qwen3.6-35B-A3B-GGUF:UD-IQ4_NL` | ~60 tok/s |
 | **24 GB** | Qwen3.6-35B-A3B UD-Q4_K_M | `anvil pull unsloth/Qwen3.6-35B-A3B-GGUF:UD-Q4_K_M` | ~45 tok/s |
