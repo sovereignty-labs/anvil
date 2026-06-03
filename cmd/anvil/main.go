@@ -385,7 +385,7 @@ func runLoad(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to parse GGUF: %w", err)
 	}
 
-	fmt.Printf("  Model: %s (%s %s)\n", meta.Name, meta.ArchDisplayName(), meta.QuantName)
+	fmt.Printf("  Model: %s (%s %s)\n", meta.Name, meta.ArchDisplayName(), meta.QuantDisplayName(filepath.Base(modelPath)))
 	fmt.Printf("  Size:  %.1f GB, Context: %d tokens\n", meta.FileSizeGB(), meta.ContextLength)
 
 	// Detect hardware
