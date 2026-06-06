@@ -59,6 +59,11 @@ Pick by your GPU's VRAM. These are tested starting points - anvil works with any
 | **24 GB** | Qwen3.6-27B UD-Q4_K_XL | `anvil pull unsloth/Qwen3.6-27B-GGUF:UD-Q4_K_XL` | ~25 tok/s |
 | **48 GB+** | Qwen3.6-35B-A3B Q8_0 | `anvil pull unsloth/Qwen3.6-35B-A3B-GGUF:Q8_0` | ~30 tok/s |
 
+> Note: tok/s isn't comparable across rows. The 8GB row runs a much smaller model
+> (Gemma 4 E4B) and is fast because it's small; higher-VRAM rows run larger, more
+> capable models that trade raw speed for quality. Pick the row for your card, not the
+> fastest number.
+
 **MoE (35B-A3B) vs Dense (27B):** The MoE model only activates 3B parameters per token despite being 35B total - much faster at the same file size. The 27B dense model scores higher on coding benchmarks (SWE-bench 77.2% vs 73.4%) but is slower because all parameters fire every token. For chat and general use, the MoE is the better experience.
 
 **Unsloth Dynamic (UD) quants** upscale important layers and are calibrated on real-world data. They outperform standard quants at the same bit rate. Prefer UD variants when available.
