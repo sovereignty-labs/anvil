@@ -1,5 +1,12 @@
 # anvil
 
+**Deprecated.** No longer developed or run. llama.cpp still serves the models. This
+repository stays up as a record. The install steps below are not maintained.
+
+t3 code and opencode are coding harnesses. They are not a replacement for this tool.
+
+---
+
 **Run models on your own iron.**
 
 Ollama opened local LLMs to a generation of people, then drifted into a blob store, a closed desktop app, and a cloud pivot — leaving everyone who just wanted a clean local tool without one. Anvil is for them: a transparent wrapper over llama.cpp that manages your models and your whole fleet, then gets out of the way. No blob store, no proprietary format, no cloud. Owned by you, not a funding round.
